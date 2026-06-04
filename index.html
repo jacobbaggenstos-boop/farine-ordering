@@ -108,8 +108,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--info);outline-of
 
 <!-- CONFIG — fill in after Supabase setup -->
 <script>
-const SUPABASE_URL = 'https://nfzdrqriiwtaahhzzecz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5memRycXJpaXd0YWFoaHp6ZWN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MzgxNzgsImV4cCI6MjA5NjExNDE3OH0.9p765PNXuPOv3iEOGaglHZQRp5YYXJIGyLYXZQNdyf0';
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 </script>
 
 <!-- AUTH SCREEN -->
@@ -190,6 +190,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     <div id="panel-admin" class="panel">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn active-admin-tab" onclick="showAdminTab('products',this)">Products</button>
+        <button class="btn" onclick="showAdminTab('catalog',this)">Categories &amp; units</button>
         <button class="btn" onclick="showAdminTab('runs',this)">Delivery runs</button>
         <button class="btn" onclick="showAdminTab('users',this)">Users</button>
         <button class="btn" onclick="showAdminTab('allorders',this)">All orders</button>
@@ -217,6 +218,34 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
         <div class="card">
           <div class="card-title">Product catalog</div>
           <div id="products-table"></div>
+        </div>
+      </div>
+      <div id="admin-catalog" class="admin-sub-panel" style="display:none">
+        <div class="row2">
+          <div>
+            <div class="card">
+              <div class="card-title">Categories</div>
+              <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:12px">Group products into categories for easier ordering. Drag to reorder.</div>
+              <div id="cat-list"></div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <input type="text" id="new-cat-name" placeholder="New category name" style="flex:1;font-size:13px"/>
+                <button class="btn btnp" onclick="addCategory()">Add</button>
+              </div>
+              <div id="cat-status" style="margin-top:8px"></div>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title">Units</div>
+              <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:12px">Units appear in the product unit dropdown. Add any unit your team uses.</div>
+              <div id="unit-list"></div>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <input type="text" id="new-unit-name" placeholder="e.g. pallet, sheet pan" style="flex:1;font-size:13px"/>
+                <button class="btn btnp" onclick="addUnit()">Add</button>
+              </div>
+              <div id="unit-status" style="margin-top:8px"></div>
+            </div>
+          </div>
         </div>
       </div>
       <div id="admin-runs" class="admin-sub-panel" style="display:none">
@@ -285,7 +314,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-let allLocations = [], allCategories = [], allProducts = [], allRuns = [], allProdFulfill = [];
+let allLocations = [], allCategories = [], allProducts = [], allRuns = [], allProdFulfill = [], allUnits = [];
 let orderQtys = {}; // productId -> qty for current order form
 let selectedRunId = null;
 
@@ -305,18 +334,20 @@ async function loadProfile() {
 }
 
 async function loadGlobalData() {
-  const [locs, cats, prods, runs, pf] = await Promise.all([
+  const [locs, cats, prods, runs, pf, units] = await Promise.all([
     sb.from('locations').select('*').order('name'),
     sb.from('categories').select('*').order('sort_order'),
     sb.from('products').select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock)').eq('active',true).order('name'),
     sb.from('delivery_runs').select('*,from_loc:locations!from_location_id(*),to_loc:locations!to_location_id(*)').eq('active',true).order('dispatch_time'),
     sb.from('product_fulfillment').select('*'),
+    sb.from('units').select('*').order('name'),
   ]);
   allLocations = locs.data||[];
   allCategories = cats.data||[];
   allProducts = prods.data||[];
   allRuns = runs.data||[];
   allProdFulfill = pf.data||[];
+  allUnits = units.data||[];
 }
 
 // ── AUTH ──────────────────────────────────────────────────
@@ -631,6 +662,7 @@ function showAdminTab(name, el) {
 
 async function loadAdminPanel() {
   populateCategorySelect('prod-cat');
+  populateUnitSelect('prod-unit');
   populateLocationSelect('inv-loc');
   populateLocationSelect('run-from', true);
   populateLocationSelect('run-to', false);
@@ -646,10 +678,114 @@ async function loadAdminPanel() {
   loadRunsTable();
   loadUsersTable();
   loadAllOrders();
+  loadCatalogSettings();
 }
 
 function populateCategorySelect(elId) {
   document.getElementById(elId).innerHTML = allCategories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+function populateUnitSelect(elId) {
+  const el = document.getElementById(elId);
+  if(!el) return;
+  const defaults = ['each','dozen','tray','case','box','bag','loaf'];
+  const fromDb = allUnits.map(u=>u.name);
+  const all = [...new Set([...defaults,...fromDb])].sort();
+  el.innerHTML = all.map(u=>`<option value="${u}">${u}</option>`).join('');
+}
+
+function loadCatalogSettings() {
+  loadCatList();
+  loadUnitList();
+}
+
+function loadCatList() {
+  const el = document.getElementById('cat-list');
+  if(!el) return;
+  if(!allCategories.length){el.innerHTML='<p class="empty">No categories.</p>';return;}
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Category</th><th>Sort</th><th></th></tr></thead><tbody>' +
+    allCategories.map(c=>`<tr>
+      <td><input type="text" value="${c.name}" id="cat-name-${c.id}" style="font-size:13px;width:100%" onblur="renameCategory('${c.id}',this.value)"/></td>
+      <td><input type="number" value="${c.sort_order}" id="cat-sort-${c.id}" style="font-size:13px;width:60px" onblur="resortCategory('${c.id}',this.value)"/></td>
+      <td><button class="btn btnsm btndanger" onclick="deleteCategory('${c.id}')">&#128465;</button></td>
+    </tr>`).join('') +
+    '</tbody></table>';
+}
+
+function loadUnitList() {
+  const el = document.getElementById('unit-list');
+  if(!el) return;
+  const defaults = ['each','dozen','tray','case','box','bag','loaf'];
+  // Show DB units + mark which are default
+  const dbNames = allUnits.map(u=>u.name);
+  const combined = [
+    ...defaults.map(d=>({id:null,name:d,isDefault:true})),
+    ...allUnits.filter(u=>!defaults.includes(u.name)).map(u=>({...u,isDefault:false}))
+  ];
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Unit</th><th></th></tr></thead><tbody>' +
+    combined.map(u=>`<tr>
+      <td>${u.name} ${u.isDefault?'<span class="badge binfo">default</span>':''}</td>
+      <td>${!u.isDefault&&u.id?`<button class="btn btnsm btndanger" onclick="deleteUnit('${u.id}')">&#128465;</button>`:'—'}</td>
+    </tr>`).join('') +
+    '</tbody></table>';
+}
+
+async function addCategory() {
+  const name = document.getElementById('new-cat-name').value.trim();
+  if(!name){setStatus('cat-status','Enter a category name.','err');return;}
+  const maxSort = Math.max(0,...allCategories.map(c=>c.sort_order||0));
+  const { error } = await sb.from('categories').insert({name,sort_order:maxSort+1});
+  if(error){setStatus('cat-status','Error: '+error.message,'err');return;}
+  document.getElementById('new-cat-name').value='';
+  setStatus('cat-status','Category added!','ok');
+  await loadGlobalData();
+  loadCatList();
+  populateCategorySelect('prod-cat');
+}
+
+async function renameCategory(id, name) {
+  if(!name.trim()) return;
+  await sb.from('categories').update({name:name.trim()}).eq('id',id);
+  await loadGlobalData();
+  populateCategorySelect('prod-cat');
+}
+
+async function resortCategory(id, sort) {
+  await sb.from('categories').update({sort_order:parseInt(sort)||0}).eq('id',id);
+  await loadGlobalData();
+  loadCatList();
+}
+
+async function deleteCategory(id) {
+  const used = allProducts.find(p=>p.category_id===id);
+  if(used){alert(`Can't delete — "${used.name}" uses this category. Reassign products first.`);return;}
+  if(!confirm('Delete this category?')) return;
+  await sb.from('categories').delete().eq('id',id);
+  setStatus('cat-status','Deleted.','ok');
+  await loadGlobalData();
+  loadCatList();
+  populateCategorySelect('prod-cat');
+}
+
+async function addUnit() {
+  const name = document.getElementById('new-unit-name').value.trim().toLowerCase();
+  if(!name){setStatus('unit-status','Enter a unit name.','err');return;}
+  if(allUnits.find(u=>u.name===name)){setStatus('unit-status','Already exists.','err');return;}
+  const { error } = await sb.from('units').insert({name});
+  if(error){setStatus('unit-status','Error: '+error.message,'err');return;}
+  document.getElementById('new-unit-name').value='';
+  setStatus('unit-status','Unit added!','ok');
+  await loadGlobalData();
+  loadUnitList();
+  populateUnitSelect('prod-unit');
+}
+
+async function deleteUnit(id) {
+  if(!confirm('Remove this unit?')) return;
+  await sb.from('units').delete().eq('id',id);
+  await loadGlobalData();
+  loadUnitList();
+  populateUnitSelect('prod-unit');
 }
 
 function populateLocationSelect(elId, fulfillOnly=null) {
