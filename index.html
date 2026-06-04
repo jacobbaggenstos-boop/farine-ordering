@@ -20,6 +20,15 @@
   --err-bg:#3a1010;--err:#f09595;--warn-bg:#3a2404;--warn:#fac775;
   --purp-bg:#1e1b4a;--purp:#afa9ec;}
 }
+/* Route / manifest extras */
+.route-stop{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)}
+.route-stop:last-child{border-bottom:none}
+.stop-num{width:26px;height:26px;border-radius:50%;background:var(--bg2);border:0.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.stop-arrow{color:var(--text3);font-size:14px}
+.leg-header{background:var(--info-bg);color:var(--info);font-size:12px;font-weight:600;padding:8px 12px;border-radius:var(--radius);margin:12px 0 6px;display:flex;align-items:center;gap:8px}
+.manifest-section{border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;overflow:hidden}
+.manifest-section-header{background:var(--bg2);padding:12px 16px;font-weight:600;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.order-dest-select{font-size:14px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);min-width:160px}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
 .shell{max-width:960px;margin:0 auto}
@@ -150,16 +159,28 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     <!-- ORDER panel -->
     <div id="panel-order" class="panel">
       <div class="card">
-        <div class="card-title">Place an order</div>
-        <div id="order-run-select"></div>
+        <div class="card-title">Place an order
+          <span id="order-next-run-badge" class="badge binfo" style="display:none"></span>
+        </div>
+        <div class="row2" style="margin-bottom:0">
+          <div class="fg">
+            <label>Deliver to</label>
+            <select id="order-dest" onchange="loadOrderItems()" class="order-dest-select">
+              <option value="">— select store —</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Notes (optional)</label>
+            <input type="text" id="order-notes" placeholder="Any special instructions…"/>
+          </div>
+        </div>
       </div>
       <div id="order-form-wrap" style="display:none">
         <div class="card">
-          <div class="card-title">Select items</div>
+          <div class="card-title">Select items <span style="font-size:12px;font-weight:400;color:var(--text2)" id="order-route-hint"></span></div>
           <div id="order-items-list"></div>
         </div>
         <div class="card">
-          <div class="fg" style="margin-bottom:12px"><label>Order notes (optional)</label><textarea id="order-notes" placeholder="Any special instructions…"></textarea></div>
           <div id="order-status"></div>
           <div class="btn-row">
             <button class="btn btnp" onclick="submitOrder()">Submit order</button>
@@ -181,7 +202,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     <div id="panel-manifest" class="panel">
       <div class="card">
         <div class="card-title">Pick manifest</div>
-        <div id="manifest-run-select"></div>
+        <div id="manifest-route-select"></div>
       </div>
       <div id="manifest-wrap"></div>
     </div>
@@ -191,7 +212,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn active-admin-tab" onclick="showAdminTab('products',this)">Products</button>
         <button class="btn" onclick="showAdminTab('catalog',this)">Categories &amp; units</button>
-        <button class="btn" onclick="showAdminTab('runs',this)">Delivery runs</button>
+        <button class="btn" onclick="showAdminTab('routes',this)">Routes</button>
         <button class="btn" onclick="showAdminTab('users',this)">Users</button>
         <button class="btn" onclick="showAdminTab('allorders',this)">All orders</button>
       </div>
@@ -252,25 +273,18 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
           </div>
         </div>
       </div>
-      <div id="admin-runs" class="admin-sub-panel" style="display:none">
+      <div id="admin-routes" class="admin-sub-panel" style="display:none">
         <div class="card">
-          <div class="card-title">Add delivery run</div>
-          <div class="row2">
-            <div class="fg"><label>From (fulfillment center)</label><select id="run-from"></select></div>
-            <div class="fg"><label>To (store)</label><select id="run-to"></select></div>
-          </div>
+          <div class="card-title">Add route</div>
           <div class="row3">
-            <div class="fg"><label>Run label</label><input type="text" id="run-label" placeholder="Morning Run"/></div>
-            <div class="fg"><label>Order cutoff</label><input type="time" id="run-cutoff" value="07:00"/></div>
-            <div class="fg"><label>Dispatch time</label><input type="time" id="run-dispatch" value="07:30"/></div>
+            <div class="fg"><label>Route name</label><input type="text" id="route-name" placeholder="e.g. D1"/></div>
+            <div class="fg"><label>Order cutoff</label><input type="time" id="route-cutoff" value="07:00"/></div>
+            <div class="fg"><label>Dispatch time</label><input type="time" id="route-dispatch" value="07:30"/></div>
           </div>
-          <div id="run-status"></div>
-          <button class="btn btnp" onclick="addRun()">Add run</button>
+          <div id="route-status"></div>
+          <button class="btn btnp" onclick="addRoute()">Add route</button>
         </div>
-        <div class="card">
-          <div class="card-title">Scheduled runs</div>
-          <div id="runs-table"></div>
-        </div>
+        <div id="routes-list"></div>
       </div>
       <div id="admin-users" class="admin-sub-panel" style="display:none">
         <div class="card">
@@ -318,7 +332,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-let allLocations = [], allCategories = [], allProducts = [], allRuns = [], allProdFulfill = [], allUnits = [];
+let allLocations = [], allCategories = [], allProducts = [], allRoutes = [], allRouteStops = [], allProdRoutes = [], allProdFulfill = [], allUnits = [];
 let orderQtys = {}; // productId -> qty for current order form
 let selectedRunId = null;
 
@@ -338,24 +352,26 @@ async function loadProfile() {
 }
 
 async function loadGlobalData() {
-  const [locs, cats, prods, runs, pf, units] = await Promise.all([
+  const [locs, cats, pf, units, routes, stops, prodRoutes] = await Promise.all([
     sb.from('locations').select('*').order('name'),
     sb.from('categories').select('*').order('sort_order'),
-    sb.from('products').select('id').limit(1), // placeholder — products fetched below with run data
-    sb.from('delivery_runs').select('*,from_loc:locations!from_location_id(*),to_loc:locations!to_location_id(*)').eq('active',true).order('dispatch_time'),
     sb.from('product_fulfillment').select('*'),
     sb.from('units').select('*').order('name'),
+    sb.from('routes').select('*').eq('active',true).order('sort_order'),
+    sb.from('route_stops').select('*,location:locations(*)').order('stop_order'),
+    sb.from('product_routes').select('*'),
   ]);
   allLocations = locs.data||[];
   allCategories = cats.data||[];
-  allRuns = runs.data||[];
   allProdFulfill = pf.data||[];
   allUnits = units.data||[];
-  // Fetch products with run links
-  const { data: prodsWithRuns } = await sb.from('products')
-    .select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock),product_runs(run_id)')
+  allRoutes = routes.data||[];
+  allRouteStops = stops.data||[];
+  allProdRoutes = prodRoutes.data||[];
+  const { data: prods } = await sb.from('products')
+    .select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock),product_routes(route_id)')
     .order('name');
-  allProducts = prodsWithRuns||[];
+  allProducts = prods||[];
 }
 
 // ── AUTH ──────────────────────────────────────────────────
@@ -422,67 +438,92 @@ function showPanel(name, el) {
 }
 
 // ── ORDER PANEL ───────────────────────────────────────────
-function loadOrderPanel() {
-  // Show delivery runs to/from this location
-  const myLocId = currentProfile?.location_id;
-  const myRuns = allRuns.filter(r => r.to_location_id === myLocId || currentProfile?.role==='admin');
+// Returns the next available route for a given destination location
+// "available" = route has a stop at that dest, product is on that route, cutoff not yet passed
+// If today's cutoff passed, returns tomorrow's same route
+function findNextRoute(destLocId, productId) {
   const now = new Date();
   const nowTime = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+  const today = now.toISOString().split('T')[0];
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate()+1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-  const el = document.getElementById('order-run-select');
-  if(!myRuns.length){el.innerHTML='<p class="empty">No delivery runs are scheduled for your location.</p>';return;}
-
-  el.innerHTML = '<div class="section-label">Select a delivery run</div>' +
-    myRuns.map(r => {
-      const isPast = r.cutoff_time <= nowTime;
-      const badge = isPast ? `<span class="badge bwarn">Cutoff passed</span>` : `<span class="badge bok">Open</span>`;
-      return `<div class="run-card" style="cursor:pointer" onclick="selectRun('${r.id}')">
-        <h4>${r.from_loc.name} → ${r.to_loc.name}: ${r.run_label} ${badge}</h4>
-        <p>Order by ${r.cutoff_time} · Dispatch ${r.dispatch_time}</p>
-      </div>`;
-    }).join('');
+  for(const route of allRoutes) {
+    // Does this route have a stop at destLocId?
+    const hasStop = allRouteStops.some(s=>s.route_id===route.id && s.location_id===destLocId);
+    if(!hasStop) continue;
+    // Is this product on this route?
+    if(productId) {
+      const onRoute = allProdRoutes.some(pr=>pr.product_id===productId && pr.route_id===route.id);
+      if(!onRoute) continue;
+    }
+    // Cutoff check
+    const cutoffPassed = route.cutoff_time <= nowTime;
+    return { route, date: cutoffPassed ? tomorrowStr : today, cutoffPassed };
+  }
+  return null;
 }
 
-async function selectRun(runId) {
-  selectedRunId = runId;
-  const run = allRuns.find(r=>r.id===runId);
+function loadOrderPanel() {
+  const myLocId = currentProfile?.location_id;
+  const orderingLocs = allLocations.filter(l=>l.can_order && l.id!==myLocId);
+  const destEl = document.getElementById('order-dest');
+  // Admins can order for any store; staff order for their own location by default
+  const dests = currentProfile?.role==='admin' ? allLocations.filter(l=>l.can_order) : orderingLocs;
+  destEl.innerHTML = '<option value="">— select store —</option>' +
+    dests.map(l=>`<option value="${l.id}">${l.name}</option>`).join('');
+  // If staff, pre-select their own store
+  if(currentProfile?.role==='staff' && myLocId) {
+    destEl.value = myLocId;
+    loadOrderItems();
+  }
+}
+
+function loadOrderItems() {
+  const destLocId = document.getElementById('order-dest').value;
+  if(!destLocId){document.getElementById('order-form-wrap').style.display='none';return;}
+
   orderQtys = {};
-
-  // Get products stocked at the FROM location of this run
-  const fulfillLocId = run.from_location_id;
-  const stockedProdIds = allProdFulfill
-    .filter(pf=>pf.location_id===fulfillLocId && pf.in_stock)
-    .map(pf=>pf.product_id);
-  const available = allProducts.filter(p=>stockedProdIds.includes(p.id));
-
+  // Show all active products; hint which route each will go on
+  const available = allProducts.filter(p=>p.active);
   if(!available.length){
     document.getElementById('order-form-wrap').style.display='none';
-    document.getElementById('order-run-select').innerHTML += '<p class="empty">No products are stocked at this fulfillment center.</p>';
     return;
   }
 
-  // Group by category
   const byCat = {};
   for(const p of available){
-    const cat = p.category?.name||'Other';
+    const cat=p.category?.name||'Other';
     if(!byCat[cat]) byCat[cat]=[];
     byCat[cat].push(p);
     orderQtys[p.id]=0;
   }
 
+  const hint = document.getElementById('order-route-hint');
+  const nextRoute = findNextRoute(destLocId, null);
+  hint.textContent = nextRoute
+    ? `Items will be assigned to ${nextRoute.route.name} on ${nextRoute.date}`
+    : 'No route found for this destination';
+
   const el = document.getElementById('order-items-list');
   el.innerHTML = Object.entries(byCat).map(([cat,prods])=>
     `<div class="section-label">${cat}</div>` +
-    prods.map(p=>`
-      <div class="order-item-row">
-        <span class="name">${p.name}</span>
+    prods.map(p=>{
+      const nr = findNextRoute(destLocId, p.id);
+      const routeHint = nr ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>` : `<span style="font-size:11px;color:var(--err)">No route</span>`;
+      return `<div class="order-item-row">
+        <div style="flex:1">
+          <span class="name">${p.name}</span>
+          <div>${routeHint}</div>
+        </div>
         <span class="unit">${p.unit}</span>
         <div class="qty-control">
           <button class="qty-btn" onclick="changeQty('${p.id}',-1)">−</button>
           <input class="qty-input" type="number" min="0" id="qty-${p.id}" value="0" onchange="orderQtys['${p.id}']=parseFloat(this.value)||0"/>
           <button class="qty-btn" onclick="changeQty('${p.id}',1)">+</button>
         </div>
-      </div>`).join('')
+      </div>`;
+    }).join('')
   ).join('');
 
   document.getElementById('order-form-wrap').style.display='block';
@@ -490,9 +531,8 @@ async function selectRun(runId) {
 
 function changeQty(prodId, delta) {
   const input = document.getElementById('qty-'+prodId);
-  const val = Math.max(0, (parseFloat(input.value)||0)+delta);
-  input.value = val;
-  orderQtys[prodId] = val;
+  const val = Math.max(0,(parseFloat(input.value)||0)+delta);
+  input.value=val; orderQtys[prodId]=val;
 }
 
 function clearOrderForm() {
@@ -501,32 +541,38 @@ function clearOrderForm() {
 }
 
 async function submitOrder() {
+  const destLocId = document.getElementById('order-dest').value;
+  if(!destLocId){setStatus('order-status','Select a destination store.','err');return;}
   const items = Object.entries(orderQtys).filter(([,q])=>q>0);
   if(!items.length){setStatus('order-status','Add at least one item.','err');return;}
   setStatus('order-status','<span class="spin"></span> Placing order…','info');
   try {
-    const run = allRuns.find(r=>r.id===selectedRunId);
-    const today = new Date().toISOString().split('T')[0];
-    const { data: order, error } = await sb.from('orders').insert({
-      ordering_location_id: currentProfile.location_id,
-      delivery_run_id: selectedRunId,
-      placed_by: currentUser.id,
-      scheduled_date: today,
-      notes: document.getElementById('order-notes').value||null,
-      status: 'pending'
-    }).select().single();
-    if(error) throw error;
-
-    const lineItems = items.map(([product_id,quantity])=>({order_id:order.id,product_id,quantity}));
-    const { error: itemErr } = await sb.from('order_items').insert(lineItems);
-    if(itemErr) throw itemErr;
-
+    // For each item, find its next route and assign accordingly
+    const byRoute = {};
+    for(const [product_id, quantity] of items){
+      const nr = findNextRoute(destLocId, product_id);
+      if(!nr){setStatus('order-status',`No route found for one or more items.`,'err');return;}
+      const key = nr.route.id+'|'+nr.date;
+      if(!byRoute[key]) byRoute[key]={route_id:nr.route.id,date:nr.date,items:[]};
+      byRoute[key].items.push({product_id,quantity});
+    }
+    // Create one order per route/date combo
+    for(const {route_id,date,items:routeItems} of Object.values(byRoute)){
+      const { data: order, error } = await sb.from('orders').insert({
+        ordering_location_id: destLocId,
+        placed_by: currentUser.id,
+        route_id,
+        scheduled_date: date,
+        notes: document.getElementById('order-notes').value||null,
+        status:'pending'
+      }).select().single();
+      if(error) throw error;
+      await sb.from('order_items').insert(routeItems.map(i=>({...i,order_id:order.id})));
+    }
     setStatus('order-status','Order placed!','ok');
     clearOrderForm();
-    selectedRunId=null;
-    document.getElementById('order-form-wrap').style.display='none';
     loadOrderPanel();
-  } catch(e) { setStatus('order-status','Error: '+e.message,'err'); }
+  } catch(e){setStatus('order-status','Error: '+e.message,'err');}
 }
 
 // ── MY ORDERS ─────────────────────────────────────────────
@@ -555,107 +601,158 @@ async function loadMyOrders() {
 }
 
 // ── MANIFEST ──────────────────────────────────────────────
-async function loadManifestPanel() {
-  const el = document.getElementById('manifest-run-select');
-  const myLocId = currentProfile?.location_id;
-  // Drivers see runs FROM their location; admins see all
-  const myRuns = currentProfile?.role==='admin' ? allRuns : allRuns.filter(r=>r.from_location_id===myLocId);
-  if(!myRuns.length){el.innerHTML='<p class="empty">No runs assigned to your location.</p>';return;}
-
-  el.innerHTML = '<div class="section-label">Select run to pick</div>' +
-    myRuns.map(r=>`<div class="run-card" style="cursor:pointer" onclick="loadManifest('${r.id}')">
-      <h4>${r.from_loc.name} → ${r.to_loc.name}: ${r.run_label}</h4>
-      <p>Dispatch ${r.dispatch_time}</p>
+function loadManifestPanel() {
+  const el = document.getElementById('manifest-route-select');
+  if(!allRoutes.length){el.innerHTML='<p class="empty">No routes configured yet.</p>';return;}
+  const today = new Date().toISOString().split('T')[0];
+  el.innerHTML = '<div class="section-label">Select route</div>' +
+    allRoutes.map(r=>`<div class="run-card" style="cursor:pointer" onclick="loadManifest('${r.id}','${today}')">
+      <h4>${r.name} <span class="badge binfo">today</span></h4>
+      <p>Cutoff ${r.cutoff_time} · Dispatch ${r.dispatch_time}</p>
     </div>`).join('');
 }
 
-async function loadManifest(runId) {
+async function loadManifest(routeId, date) {
   const wrap = document.getElementById('manifest-wrap');
-  wrap.innerHTML='<span class="spin"></span> Loading orders…';
-  const today = new Date().toISOString().split('T')[0];
-  const { data, error } = await sb.from('orders')
-    .select('*,ordering_loc:locations!ordering_location_id(name),items:order_items(*,product:products(name,unit))')
-    .eq('delivery_run_id', runId)
-    .eq('scheduled_date', today)
+  wrap.innerHTML = '<div class="card"><span class="spin"></span> Loading manifest…</div>';
+  const route = allRoutes.find(r=>r.id===routeId);
+
+  // Fetch all orders for this route+date
+  const { data: orders, error } = await sb.from('orders')
+    .select('*,ordering_loc:locations!ordering_location_id(*),items:order_items(*,product:products(name,unit))')
+    .eq('route_id', routeId)
+    .eq('scheduled_date', date)
     .in('status',['pending','picking']);
 
-  if(error){wrap.innerHTML='<p class="empty">Error loading manifest.</p>';return;}
-  if(!data?.length){wrap.innerHTML='<p class="empty">No orders for this run today.</p>';return;}
+  if(error||!orders?.length){
+    wrap.innerHTML='<p class="empty" style="padding:24px">No orders for this route today.</p>';
+    return;
+  }
 
-  // Aggregate items across all orders for this run, grouped by store
-  wrap.innerHTML = data.map(order=>{
-    const items = (order.items||[]);
-    if(!items.length) return '';
-    return `<div class="card">
-      <div class="card-title">
-        ${order.ordering_loc?.name||'Unknown'}
-        <span class="badge binfo">${items.length} item${items.length!==1?'s':''}</span>
-        <span class="badge ${order.status==='picking'?'bwarn':'binfo'}">${order.status}</span>
-      </div>
-      <div id="manifest-items-${order.id}">
-        ${items.map(item=>renderManifestItem(item, order.id)).join('')}
-      </div>
-      <div class="btn-row" style="margin-top:12px">
-        <button class="btn btnp btnsm" onclick="markAllPicked('${order.id}')">Mark all picked</button>
-        <button class="btn btnsm" onclick="dispatchOrder('${order.id}')">Dispatch →</button>
-      </div>
+  // Get stops for this route in order
+  const stops = allRouteStops.filter(s=>s.route_id===routeId).sort((a,b)=>a.stop_order-b.stop_order);
+
+  // Build legs: consecutive pairs of stops
+  // Leg = {from: stop, to: stop}
+  // For each leg, gather orders whose destination = leg.to location
+  const legs = [];
+  for(let i=0;i<stops.length-1;i++){
+    legs.push({from:stops[i], to:stops[i+1]});
+  }
+
+  // Consolidate orders by destination location
+  const byDest = {};
+  for(const order of orders){
+    const locId = order.ordering_location_id;
+    if(!byDest[locId]) byDest[locId]={loc:order.ordering_loc,orders:[],items:{}};
+    byDest[locId].orders.push(order);
+    for(const item of (order.items||[])){
+      const pid = item.product_id;
+      if(!byDest[locId].items[pid]) byDest[locId].items[pid]={item,totalQty:0,itemIds:[]};
+      byDest[locId].items[pid].totalQty += Number(item.quantity);
+      byDest[locId].items[pid].itemIds.push(item.id);
+    }
+  }
+
+  // Render: route header then legs
+  let html = `<div class="manifest-section">
+    <div class="manifest-section-header">
+      <span>${route.name} — ${new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+      <button class="btn btnsm btnp" onclick="markRouteDispatched('${routeId}','${date}')">Dispatch all →</button>
     </div>`;
-  }).join('');
+
+  if(!legs.length){
+    html += '<p class="empty">No stops configured for this route.</p>';
+  } else {
+    for(const leg of legs){
+      const legDests = byDest[leg.to.location_id];
+      html += `<div style="padding:12px 16px">
+        <div class="leg-header">
+          <span>🚐</span>
+          <span>${leg.from.location?.name||'?'} → ${leg.to.location?.name||'?'}</span>
+          ${legDests?`<span class="badge bok">${Object.keys(legDests.items).length} items</span>`:'<span class="badge" style="background:var(--bg2);color:var(--text3)">No orders</span>'}
+        </div>`;
+      if(legDests){
+        html += `<div id="leg-items-${leg.to.location_id}">`;
+        for(const {item,totalQty,itemIds} of Object.values(legDests.items)){
+          html += renderConsolidatedItem(item, totalQty, itemIds, leg.to.location_id);
+        }
+        html += `</div>
+        <div class="btn-row" style="margin:8px 0 4px">
+          <button class="btn btnsm btnp" onclick="markLegAllPicked('${leg.to.location_id}','${routeId}','${date}')">Mark all picked</button>
+        </div>`;
+      }
+      html += '</div>';
+    }
+  }
+  html += '</div>';
+  wrap.innerHTML = html;
 }
 
-function renderManifestItem(item, orderId) {
-  const cls = item.picked?'picked':item.oos?'oos':'';
-  return `<div class="manifest-item ${cls}" id="mitem-${item.id}">
-    <div class="check ${item.picked?'checked':''}" onclick="togglePicked('${item.id}','${orderId}',${!item.picked})">${item.picked?'✓':''}</div>
+function renderConsolidatedItem(item, totalQty, itemIds, legLocId){
+  const allPicked = false; // will be checked live
+  const idsAttr = itemIds.join(',');
+  return `<div class="manifest-item" id="citem-${legLocId}-${item.product_id}">
+    <div class="check" onclick="toggleConsolidatedPicked('${legLocId}','${item.product_id}','${idsAttr}',this)">${''}</div>
     <div style="flex:1">
       <div class="item-name">${item.product?.name||'?'}</div>
-      <div class="item-meta">${item.product?.unit||''} ${item.oos?'<span class="badge berr">Out of stock</span>':''} ${item.rolled_over?'<span class="badge bwarn">Rolled over</span>':''}</div>
+      <div class="item-meta">${item.product?.unit||''}</div>
     </div>
-    <div class="item-qty">${item.quantity}</div>
-    ${!item.picked&&!item.oos?`<button class="btn btnsm btndanger" onclick="markOOS('${item.id}','${orderId}')">OOS</button>`:''}
+    <div class="item-qty">${totalQty}</div>
+    <button class="btn btnsm btndanger" onclick="markConsolidatedOOS('${legLocId}','${item.product_id}','${idsAttr}')">OOS</button>
   </div>`;
 }
 
-async function togglePicked(itemId, orderId, picked) {
-  await sb.from('order_items').update({picked}).eq('id',itemId);
-  refreshManifestItem(itemId, orderId);
+async function toggleConsolidatedPicked(legLocId, productId, idsStr, checkEl){
+  const ids = idsStr.split(',');
+  const isPicked = checkEl.classList.contains('checked');
+  const newPicked = !isPicked;
+  await sb.from('order_items').update({picked:newPicked}).in('id',ids);
+  checkEl.classList.toggle('checked', newPicked);
+  checkEl.textContent = newPicked ? '✓' : '';
+  const row = document.getElementById(`citem-${legLocId}-${productId}`);
+  if(row){ row.classList.toggle('picked', newPicked); }
 }
 
-async function markOOS(itemId, orderId) {
-  if(!confirm('Mark this item as out of stock? It will be removed from this order.')) return;
-  await sb.from('order_items').update({oos:true, picked:false}).eq('id',itemId);
-  refreshManifestItem(itemId, orderId);
+async function markConsolidatedOOS(legLocId, productId, idsStr){
+  if(!confirm('Mark out of stock? These items will be flagged and rolled to the next run.')) return;
+  const ids = idsStr.split(',');
+  await sb.from('order_items').update({oos:true,picked:false}).in('id',ids);
+  const row = document.getElementById(`citem-${legLocId}-${productId}`);
+  if(row){ row.classList.add('oos'); row.querySelector('.check').textContent=''; }
 }
 
-async function refreshManifestItem(itemId, orderId) {
-  const { data } = await sb.from('order_items').select('*,product:products(name,unit)').eq('id',itemId).single();
-  if(data) document.getElementById('mitem-'+itemId).outerHTML = renderManifestItem(data, orderId);
+async function markLegAllPicked(legLocId, routeId, date){
+  // Get all order_item ids for this leg destination on this route+date
+  const { data: orders } = await sb.from('orders')
+    .select('id').eq('route_id',routeId).eq('scheduled_date',date).eq('ordering_location_id',legLocId);
+  if(!orders?.length) return;
+  const orderIds = orders.map(o=>o.id);
+  await sb.from('order_items').update({picked:true}).in('order_id',orderIds).eq('oos',false);
+  // Refresh the leg visually
+  document.querySelectorAll(`[id^="citem-${legLocId}-"]`).forEach(el=>{
+    el.classList.add('picked');
+    const chk = el.querySelector('.check');
+    if(chk){chk.classList.add('checked');chk.textContent='✓';}
+  });
 }
 
-async function markAllPicked(orderId) {
-  await sb.from('order_items').update({picked:true}).eq('order_id',orderId).eq('oos',false);
-  await sb.from('orders').update({status:'picking'}).eq('id',orderId);
-  // Refresh the items list
-  const { data } = await sb.from('orders')
-    .select('*,ordering_loc:locations!ordering_location_id(name),items:order_items(*,product:products(name,unit))')
-    .eq('id',orderId).single();
-  if(data) {
-    document.getElementById('manifest-items-'+orderId).innerHTML =
-      (data.items||[]).map(item=>renderManifestItem(item,orderId)).join('');
+async function markRouteDispatched(routeId, date){
+  if(!confirm('Mark entire route as dispatched? Unpicked items will roll over to next run.')) return;
+  const { data: orders } = await sb.from('orders')
+    .select('id,items:order_items(id,picked,oos)')
+    .eq('route_id',routeId).eq('scheduled_date',date).in('status',['pending','picking']);
+  if(!orders) return;
+  let rolledCount = 0;
+  for(const order of orders){
+    const unpicked = (order.items||[]).filter(i=>!i.picked&&!i.oos);
+    if(unpicked.length){
+      await sb.from('order_items').update({rolled_over:true}).in('id',unpicked.map(i=>i.id));
+      rolledCount += unpicked.length;
+    }
   }
-}
-
-async function dispatchOrder(orderId) {
-  // Roll over any unpicked, non-OOS items to next run
-  const { data: unpicked } = await sb.from('order_items')
-    .select('*').eq('order_id',orderId).eq('picked',false).eq('oos',false);
-  if(unpicked?.length) {
-    // Mark them rolled over on the current order
-    await sb.from('order_items').update({rolled_over:true})
-      .eq('order_id',orderId).eq('picked',false).eq('oos',false);
-  }
-  await sb.from('orders').update({status:'dispatched'}).eq('id',orderId);
-  alert('Order dispatched!' + (unpicked?.length ? ` ${unpicked.length} item(s) rolled over to next run.`:''));
+  await sb.from('orders').update({status:'dispatched'}).in('id',orders.map(o=>o.id));
+  alert(`Route dispatched!${rolledCount?' '+rolledCount+' item(s) rolled to next run.':''}`);
   loadManifestPanel();
   document.getElementById('manifest-wrap').innerHTML='';
 }
@@ -666,6 +763,7 @@ function showAdminTab(name, el) {
   document.querySelectorAll('.active-admin-tab').forEach(b=>b.classList.remove('active-admin-tab'));
   document.getElementById('admin-'+name).style.display='block';
   if(el){el.classList.add('active-admin-tab');}
+  if(name==='routes') loadRoutesAdmin();
 }
 
 async function loadAdminPanel() {
@@ -681,15 +779,15 @@ async function loadAdminPanel() {
     `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
       <input type="checkbox" value="${l.id}" id="fl-${l.id}"/> ${l.name}
     </label>`).join('');
-  // Delivery run checkboxes for new product
-  document.getElementById('prod-runs').innerHTML = allRuns.length
-    ? allRuns.map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-        <input type="checkbox" value="${r.id}"/> ${r.from_loc?.name}→${r.to_loc?.name}: ${r.run_label}
+  // Route checkboxes for new product
+  document.getElementById('prod-runs').innerHTML = allRoutes.length
+    ? allRoutes.map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+        <input type="checkbox" value="${r.id}"/> ${r.name}
       </label>`).join('')
-    : '<span style="font-size:12px;color:var(--text3)">No runs configured yet — add them in Delivery Runs tab first.</span>';
+    : '<span style="font-size:12px;color:var(--text3)">No routes configured yet — add them in the Routes tab first.</span>';
 
   loadProductsTable();
-  loadRunsTable();
+  loadRoutesAdmin();
   loadUsersTable();
   loadAllOrders();
   loadCatalogSettings();
@@ -820,7 +918,7 @@ async function addProduct() {
   const { data: prod, error } = await sb.from('products').insert({name,category_id,unit}).select().single();
   if(error){setStatus('prod-status','Error: '+error.message,'err');return;}
   if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:prod.id,location_id})));
-  if(runIds.length) await sb.from('product_runs').insert(runIds.map(run_id=>({product_id:prod.id,run_id})));
+  if(runIds.length) await sb.from('product_routes').insert(runIds.map(route_id=>({product_id:prod.id,route_id})));
   setStatus('prod-status','Product added!','ok');
   document.getElementById('prod-name').value='';
   document.querySelectorAll('#prod-locations input, #prod-runs input').forEach(c=>c.checked=false);
@@ -845,9 +943,9 @@ function loadProductsTable() {
           const loc=allLocations.find(l=>l.id===f.location_id);
           return `<span class="chip">${loc?.short_code||'?'}</span>`;
         }).join('');
-        const runs = (p.product_runs||[]).map(r=>{
-          const run=allRuns.find(rn=>rn.id===r.run_id);
-          return run?`<span class="chip">${run.run_label}</span>`:'';
+        const runs = (p.product_routes||[]).map(r=>{
+          const route=allRoutes.find(rn=>rn.id===r.route_id);
+          return route?`<span class="chip">${route.name}</span>`:'';
         }).join('');
         return `<tr>
           <td><strong>${p.name}</strong></td>
@@ -900,9 +998,9 @@ function openEditProduct(id) {
       <input type="checkbox" value="${l.id}" ${fulfillLocIds.includes(l.id)?'checked':''}/> ${l.name}
     </label>`).join('');
 
-  document.getElementById('edit-prod-runs').innerHTML = allRuns.map(r=>
+  document.getElementById('edit-prod-runs').innerHTML = allRoutes.map(r=>
     `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-      <input type="checkbox" value="${r.id}" ${runIds.includes(r.id)?'checked':''}/> ${r.from_loc?.name}→${r.to_loc?.name}: ${r.run_label}
+      <input type="checkbox" value="${r.id}" ${runIds.includes(r.id)?'checked':''}/> ${r.name}
     </label>`).join('');
 
   modal.style.display='flex';
@@ -922,8 +1020,8 @@ async function saveEditProduct() {
     await sb.from('products').update({name,category_id,unit,active}).eq('id',id);
     await sb.from('product_fulfillment').delete().eq('product_id',id);
     if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:id,location_id})));
-    await sb.from('product_runs').delete().eq('product_id',id);
-    if(runIds.length) await sb.from('product_runs').insert(runIds.map(run_id=>({product_id:id,run_id})));
+    await sb.from('product_routes').delete().eq('product_id',id);
+    if(runIds.length) await sb.from('product_routes').insert(runIds.map(route_id=>({product_id:id,route_id})));
     setStatus('edit-prod-status','Saved!','ok');
     await loadGlobalData();
     loadProductsTable();
@@ -935,39 +1033,78 @@ function closeEditModal() {
   document.getElementById('edit-modal').style.display='none';
 }
 
-async function addRun() {
-  const from = document.getElementById('run-from').value;
-  const to = document.getElementById('run-to').value;
-  const label = document.getElementById('run-label').value.trim();
-  const cutoff = document.getElementById('run-cutoff').value;
-  const dispatch = document.getElementById('run-dispatch').value;
-  if(!label){setStatus('run-status','Enter a run label.','err');return;}
-  if(from===to){setStatus('run-status','From and To must be different locations.','err');return;}
-  const { error } = await sb.from('delivery_runs').insert({from_location_id:from,to_location_id:to,run_label:label,cutoff_time:cutoff,dispatch_time:dispatch});
-  if(error){setStatus('run-status','Error: '+error.message,'err');return;}
-  setStatus('run-status','Run added!','ok');
-  document.getElementById('run-label').value='';
+async function addRoute() {
+  const name = document.getElementById('route-name').value.trim();
+  const cutoff = document.getElementById('route-cutoff').value;
+  const dispatch = document.getElementById('route-dispatch').value;
+  if(!name){setStatus('route-status','Enter a route name.','err');return;}
+  const maxSort = Math.max(0,...allRoutes.map(r=>r.sort_order||0));
+  const { data: route, error } = await sb.from('routes').insert({name,cutoff_time:cutoff,dispatch_time:dispatch,sort_order:maxSort+1}).select().single();
+  if(error){setStatus('route-status','Error: '+error.message,'err');return;}
+  setStatus('route-status','Route added! Now add stops below.','ok');
+  document.getElementById('route-name').value='';
   await loadGlobalData();
-  loadRunsTable();
+  loadRoutesAdmin();
 }
 
-function loadRunsTable() {
-  const el = document.getElementById('runs-table');
-  if(!allRuns.length){el.innerHTML='<p class="empty">No runs configured yet.</p>';return;}
-  el.innerHTML='<table class="tbl"><thead><tr><th>From</th><th>To</th><th>Label</th><th>Cutoff</th><th>Dispatch</th><th></th></tr></thead><tbody>'+
-    allRuns.map(r=>`<tr>
-      <td>${r.from_loc?.name||'?'}</td><td>${r.to_loc?.name||'?'}</td>
-      <td>${r.run_label}</td><td>${r.cutoff_time}</td><td>${r.dispatch_time}</td>
-      <td><button class="btn btnsm btndanger" onclick="deactivateRun('${r.id}')">Remove</button></td>
-    </tr>`).join('')+
-    '</tbody></table>';
+function loadRoutesAdmin() {
+  const el = document.getElementById('routes-list');
+  if(!allRoutes.length){el.innerHTML='<p class="empty" style="padding:20px">No routes yet. Add one above.</p>';return;}
+  el.innerHTML = allRoutes.map(route=>{
+    const stops = allRouteStops.filter(s=>s.route_id===route.id).sort((a,b)=>a.stop_order-b.stop_order);
+    const stopHtml = stops.length
+      ? stops.map((s,i)=>`<div class="route-stop">
+          <div class="stop-num">${i+1}</div>
+          <span style="flex:1;font-size:13px">${s.location?.name||'?'}</span>
+          <button class="btn btnsm btndanger" onclick="removeStop('${s.id}','${route.id}')">✕</button>
+        </div>`).join('')
+      : '<p style="font-size:13px;color:var(--text3);padding:8px 0">No stops yet.</p>';
+
+    return `<div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>${route.name} <span style="font-size:12px;font-weight:400;color:var(--text2)">· cutoff ${route.cutoff_time} · dispatch ${route.dispatch_time}</span></span>
+        <button class="btn btnsm btndanger" onclick="deleteRoute('${route.id}')">Delete route</button>
+      </div>
+      <div style="margin-bottom:10px">${stopHtml}</div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div class="fg" style="flex:1"><label>Add stop</label>
+          <select id="stop-loc-${route.id}">
+            ${allLocations.map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btnp" onclick="addStop('${route.id}')">Add stop</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-async function deactivateRun(id) {
-  if(!confirm('Remove this delivery run?')) return;
-  await sb.from('delivery_runs').update({active:false}).eq('id',id);
+async function addStop(routeId){
+  const locId = document.getElementById('stop-loc-'+routeId).value;
+  const existingStops = allRouteStops.filter(s=>s.route_id===routeId);
+  const maxOrder = Math.max(0,...existingStops.map(s=>s.stop_order));
+  const { error } = await sb.from('route_stops').insert({route_id:routeId,location_id:locId,stop_order:maxOrder+1});
+  if(error){alert('Error: '+error.message);return;}
   await loadGlobalData();
-  loadRunsTable();
+  loadRoutesAdmin();
+}
+
+async function removeStop(stopId, routeId){
+  await sb.from('route_stops').delete().eq('id',stopId);
+  // Re-number remaining stops
+  const remaining = allRouteStops.filter(s=>s.route_id===routeId&&s.id!==stopId).sort((a,b)=>a.stop_order-b.stop_order);
+  for(let i=0;i<remaining.length;i++){
+    await sb.from('route_stops').update({stop_order:i+1}).eq('id',remaining[i].id);
+  }
+  await loadGlobalData();
+  loadRoutesAdmin();
+}
+
+async function deleteRoute(id){
+  if(!confirm('Delete this route and all its stops?')) return;
+  await sb.from('route_stops').delete().eq('route_id',id);
+  await sb.from('routes').update({active:false}).eq('id',id);
+  await loadGlobalData();
+  loadRoutesAdmin();
 }
 
 async function inviteUser() {
