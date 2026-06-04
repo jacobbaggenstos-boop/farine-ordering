@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Farine Internal Ordering</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#ffffff;--bg2:#f7f6f3;--bg3:#f0efe9;--text:#1a1a1a;--text2:#6b6b6b;--text3:#9b9b9b;
+  --border:rgba(0,0,0,0.12);--border2:rgba(0,0,0,0.22);
+  --info-bg:#e6f1fb;--info:#0c447c;--ok-bg:#eaf3de;--ok:#27500a;
+  --err-bg:#fcebeb;--err:#791f1f;--warn-bg:#faeeda;--warn:#633806;
+  --purp-bg:#eeedfe;--purp:#3c3489;--radius:8px;--radius-lg:12px;
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#1e1e1e;--bg2:#272727;--bg3:#2e2e2e;--text:#f0f0f0;--text2:#aaa;--text3:#717171;
+  --border:rgba(255,255,255,0.12);--border2:rgba(255,255,255,0.22);
+  --info-bg:#0c2a48;--info:#85b7eb;--ok-bg:#17340a;--ok:#97c459;
+  --err-bg:#3a1010;--err:#f09595;--warn-bg:#3a2404;--warn:#fac775;
+  --purp-bg:#1e1b4a;--purp:#afa9ec;}
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+.shell{max-width:960px;margin:0 auto}
+/* Auth */
+.auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:100%;max-width:400px}
+.auth-title{font-size:22px;font-weight:600;margin-bottom:4px}
+.auth-sub{font-size:13px;color:var(--text2);margin-bottom:24px}
+/* App shell */
+header{background:var(--bg);border-bottom:0.5px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:100}
+.header-left h1{font-size:17px;font-weight:600}
+.header-left p{font-size:12px;color:var(--text2)}
+.nav{display:flex;gap:4px;padding:0 24px;background:var(--bg);border-bottom:0.5px solid var(--border);overflow-x:auto}
+.nav-btn{font-size:13px;padding:10px 14px;border:none;background:none;cursor:pointer;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;border-radius:4px 4px 0 0}
+.nav-btn:hover:not(.active){background:var(--bg2);color:var(--text)}
+.nav-btn.active{color:var(--text);border-bottom-color:var(--text);font-weight:500}
+.content{padding:24px}
+.panel{display:none}.panel.active{display:block}
+/* Cards */
+.card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+/* Forms */
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.4px}
+.fg input,.fg select,.fg textarea,input,select,textarea{background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius);padding:8px 10px;font-size:13px;color:var(--text);width:100%}
+.fg textarea{resize:vertical;min-height:70px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--info);outline-offset:1px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+/* Buttons */
+.btn{padding:8px 14px;font-size:13px;border-radius:var(--radius);cursor:pointer;border:0.5px solid var(--border2);background:var(--bg);color:var(--text);font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--bg2)}.btn:active{transform:scale(.98)}
+.btnp{background:var(--text);color:var(--bg);border-color:var(--text)}.btnp:hover{opacity:.85}
+.btnsm{padding:4px 9px;font-size:12px}
+.btndanger{background:var(--err-bg);color:var(--err);border-color:var(--err)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+/* Badges */
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
+.bok{background:var(--ok-bg);color:var(--ok)}.berr{background:var(--err-bg);color:var(--err)}
+.bwarn{background:var(--warn-bg);color:var(--warn)}.binfo{background:var(--info-bg);color:var(--info)}
+.bpurp{background:var(--purp-bg);color:var(--purp)}
+/* Status */
+.status{font-size:13px;padding:10px 14px;border-radius:var(--radius);margin-bottom:14px}
+.sinfo{background:var(--info-bg);color:var(--info)}.serr{background:var(--err-bg);color:var(--err)}
+.sok{background:var(--ok-bg);color:var(--ok)}.swarn{background:var(--warn-bg);color:var(--warn)}
+/* Tables */
+.tbl{width:100%;font-size:13px;border-collapse:collapse}
+.tbl th{font-size:11px;font-weight:600;color:var(--text2);text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);text-transform:uppercase;letter-spacing:.3px}
+.tbl td{padding:9px 10px;border-bottom:0.5px solid var(--border);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tbody tr:hover td{background:var(--bg2)}
+.tbl-section td{font-size:11px;font-weight:600;color:var(--text2);background:var(--bg2);text-transform:uppercase;letter-spacing:.4px;padding:6px 10px}
+/* Manifest */
+.manifest-item{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:0.5px solid var(--border);transition:background .15s}
+.manifest-item.picked{background:var(--ok-bg);opacity:.7}
+.manifest-item.oos{background:var(--err-bg);opacity:.7}
+.manifest-item .check{width:22px;height:22px;border-radius:6px;border:2px solid var(--border2);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--bg)}
+.manifest-item .check.checked{background:var(--ok);border-color:var(--ok);color:white}
+.manifest-item .item-name{flex:1;font-weight:500}
+.manifest-item .item-meta{font-size:12px;color:var(--text2)}
+.manifest-item .item-qty{font-size:16px;font-weight:600;min-width:50px;text-align:right}
+/* Order form */
+.order-item-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border)}
+.order-item-row:last-child{border-bottom:none}
+.order-item-row .name{flex:1;font-size:13px}
+.order-item-row .unit{font-size:12px;color:var(--text2);min-width:40px}
+.qty-control{display:flex;align-items:center;gap:6px}
+.qty-btn{width:28px;height:28px;border-radius:6px;border:0.5px solid var(--border2);background:var(--bg2);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.qty-btn:hover{background:var(--bg3)}
+.qty-input{width:52px;text-align:center;font-size:14px;font-weight:600;padding:4px;border-radius:6px}
+/* Misc */
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border2);border-top-color:var(--text);border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle;margin-right:5px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:32px;color:var(--text2);font-size:13px}
+.divider{border:none;border-top:0.5px solid var(--border);margin:16px 0}
+.chip{display:inline-block;font-size:11px;background:var(--bg2);border:0.5px solid var(--border);border-radius:20px;padding:2px 8px;margin:2px}
+.run-card{border:0.5px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;background:var(--bg)}
+.run-card h4{font-size:14px;font-weight:600;margin-bottom:4px}
+.run-card p{font-size:12px;color:var(--text2)}
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin:16px 0 8px}
+@media(max-width:600px){.row2,.row3{grid-template-columns:1fr}.card-row{flex-direction:column;align-items:flex-start}}
+</style>
+</head>
+<body>
+
+<!-- CONFIG — fill in after Supabase setup -->
+<script>
+const SUPABASE_URL = 'https://nfzdrqriiwtaahhzzecz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5memRycXJpaXd0YWFoaHp6ZWN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MzgxNzgsImV4cCI6MjA5NjExNDE3OH0.9p765PNXuPOv3iEOGaglHZQRp5YYXJIGyLYXZQNdyf0';
+</script>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="auth-wrap" style="display:none">
+  <div class="auth-card">
+    <div class="auth-title">Farine Internal Ordering</div>
+    <div class="auth-sub">Sign in to your account</div>
+    <div id="auth-status"></div>
+    <div class="fg" style="margin-bottom:12px">
+      <label>Email</label>
+      <input type="email" id="auth-email" placeholder="you@farine.com" onkeydown="if(event.key==='Enter')signIn()"/>
+    </div>
+    <div class="fg" style="margin-bottom:16px">
+      <label>Password</label>
+      <input type="password" id="auth-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')signIn()"/>
+    </div>
+    <button class="btn btnp" style="width:100%" onclick="signIn()">Sign in</button>
+    <div style="margin-top:12px;font-size:12px;color:var(--text2);text-align:center">
+      Contact your admin to get an account set up.
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" style="display:none">
+  <header>
+    <div class="header-left">
+      <h1>Farine Internal Ordering</h1>
+      <p id="header-sub">Loading…</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="header-user" style="font-size:12px;color:var(--text2)"></span>
+      <button class="btn btnsm" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+  <nav class="nav" id="main-nav"></nav>
+  <div class="content">
+    <!-- ORDER panel -->
+    <div id="panel-order" class="panel">
+      <div class="card">
+        <div class="card-title">Place an order</div>
+        <div id="order-run-select"></div>
+      </div>
+      <div id="order-form-wrap" style="display:none">
+        <div class="card">
+          <div class="card-title">Select items</div>
+          <div id="order-items-list"></div>
+        </div>
+        <div class="card">
+          <div class="fg" style="margin-bottom:12px"><label>Order notes (optional)</label><textarea id="order-notes" placeholder="Any special instructions…"></textarea></div>
+          <div id="order-status"></div>
+          <div class="btn-row">
+            <button class="btn btnp" onclick="submitOrder()">Submit order</button>
+            <button class="btn" onclick="clearOrderForm()">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MY ORDERS panel -->
+    <div id="panel-myorders" class="panel">
+      <div class="card">
+        <div class="card-title">My recent orders</div>
+        <div id="my-orders-list"></div>
+      </div>
+    </div>
+
+    <!-- MANIFEST panel -->
+    <div id="panel-manifest" class="panel">
+      <div class="card">
+        <div class="card-title">Pick manifest</div>
+        <div id="manifest-run-select"></div>
+      </div>
+      <div id="manifest-wrap"></div>
+    </div>
+
+    <!-- ADMIN panel -->
+    <div id="panel-admin" class="panel">
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <button class="btn active-admin-tab" onclick="showAdminTab('products',this)">Products</button>
+        <button class="btn" onclick="showAdminTab('runs',this)">Delivery runs</button>
+        <button class="btn" onclick="showAdminTab('users',this)">Users</button>
+        <button class="btn" onclick="showAdminTab('allorders',this)">All orders</button>
+      </div>
+      <div id="admin-products" class="admin-sub-panel">
+        <div class="card">
+          <div class="card-title">Add product</div>
+          <div class="row3">
+            <div class="fg"><label>Name</label><input type="text" id="prod-name" placeholder="e.g. Chocolate Croissant"/></div>
+            <div class="fg"><label>Category</label><select id="prod-cat"></select></div>
+            <div class="fg"><label>Unit</label>
+              <select id="prod-unit">
+                <option>each</option><option>dozen</option><option>tray</option>
+                <option>case</option><option>box</option><option>bag</option><option>loaf</option>
+              </select>
+            </div>
+          </div>
+          <div class="fg" style="margin-bottom:12px">
+            <label>Stocked at (fulfillment centers)</label>
+            <div id="prod-locations" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
+          <div id="prod-status"></div>
+          <button class="btn btnp" onclick="addProduct()">Add product</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Product catalog</div>
+          <div id="products-table"></div>
+        </div>
+      </div>
+      <div id="admin-runs" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Add delivery run</div>
+          <div class="row2">
+            <div class="fg"><label>From (fulfillment center)</label><select id="run-from"></select></div>
+            <div class="fg"><label>To (store)</label><select id="run-to"></select></div>
+          </div>
+          <div class="row3">
+            <div class="fg"><label>Run label</label><input type="text" id="run-label" placeholder="Morning Run"/></div>
+            <div class="fg"><label>Order cutoff</label><input type="time" id="run-cutoff" value="07:00"/></div>
+            <div class="fg"><label>Dispatch time</label><input type="time" id="run-dispatch" value="07:30"/></div>
+          </div>
+          <div id="run-status"></div>
+          <button class="btn btnp" onclick="addRun()">Add run</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Scheduled runs</div>
+          <div id="runs-table"></div>
+        </div>
+      </div>
+      <div id="admin-users" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Invite new user</div>
+          <div class="row3">
+            <div class="fg"><label>Full name</label><input type="text" id="inv-name" placeholder="Jane Smith"/></div>
+            <div class="fg"><label>Email</label><input type="email" id="inv-email" placeholder="jane@farine.com"/></div>
+            <div class="fg"><label>Temporary password</label><input type="text" id="inv-pass" placeholder="min 6 chars"/></div>
+          </div>
+          <div class="row2">
+            <div class="fg"><label>Role</label>
+              <select id="inv-role">
+                <option value="staff">Store staff</option>
+                <option value="driver">Driver / fulfillment</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="fg"><label>Home location</label><select id="inv-loc"></select></div>
+          </div>
+          <div id="inv-status"></div>
+          <button class="btn btnp" onclick="inviteUser()">Create account</button>
+        </div>
+        <div class="card">
+          <div class="card-title">All users</div>
+          <div id="users-table"></div>
+        </div>
+      </div>
+      <div id="admin-allorders" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">All orders</div>
+          <div id="all-orders-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading-screen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--text2)">
+  <span class="spin"></span> Loading…
+</div>
+
+<script>
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let currentProfile = null;
+let allLocations = [], allCategories = [], allProducts = [], allRuns = [], allProdFulfill = [];
+let orderQtys = {}; // productId -> qty for current order form
+let selectedRunId = null;
+
+// ── INIT ──────────────────────────────────────────────────
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session) { showAuth(); return; }
+  currentUser = session.user;
+  await loadProfile();
+  await loadGlobalData();
+  showApp();
+}
+
+async function loadProfile() {
+  const { data } = await sb.from('profiles').select('*,location:locations(*)').eq('id', currentUser.id).single();
+  currentProfile = data;
+}
+
+async function loadGlobalData() {
+  const [locs, cats, prods, runs, pf] = await Promise.all([
+    sb.from('locations').select('*').order('name'),
+    sb.from('categories').select('*').order('sort_order'),
+    sb.from('products').select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock)').eq('active',true).order('name'),
+    sb.from('delivery_runs').select('*,from_loc:locations!from_location_id(*),to_loc:locations!to_location_id(*)').eq('active',true).order('dispatch_time'),
+    sb.from('product_fulfillment').select('*'),
+  ]);
+  allLocations = locs.data||[];
+  allCategories = cats.data||[];
+  allProducts = prods.data||[];
+  allRuns = runs.data||[];
+  allProdFulfill = pf.data||[];
+}
+
+// ── AUTH ──────────────────────────────────────────────────
+function showAuth() {
+  document.getElementById('loading-screen').style.display='none';
+  document.getElementById('auth-screen').style.display='flex';
+  document.getElementById('app').style.display='none';
+}
+
+function showApp() {
+  document.getElementById('loading-screen').style.display='none';
+  document.getElementById('auth-screen').style.display='none';
+  document.getElementById('app').style.display='block';
+  const loc = currentProfile?.location?.name || '';
+  document.getElementById('header-sub').textContent = loc + ' · ' + (currentProfile?.role||'');
+  document.getElementById('header-user').textContent = currentProfile?.full_name||currentUser.email;
+  buildNav();
+  // Show first available panel
+  const firstTab = document.querySelector('.nav-btn');
+  if(firstTab) firstTab.click();
+}
+
+async function signIn() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-password').value;
+  if(!email||!pass){setStatus('auth-status','Enter email and password.','err');return;}
+  setStatus('auth-status','<span class="spin"></span> Signing in…','info');
+  const { error } = await sb.auth.signInWithPassword({email, password:pass});
+  if(error){setStatus('auth-status',error.message,'err');return;}
+  currentUser = (await sb.auth.getSession()).data.session.user;
+  await loadProfile();
+  await loadGlobalData();
+  showApp();
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  currentUser=null; currentProfile=null;
+  showAuth();
+}
+
+// ── NAV ───────────────────────────────────────────────────
+function buildNav() {
+  const role = currentProfile?.role;
+  const nav = document.getElementById('main-nav');
+  const tabs = [];
+  if(role==='staff'||role==='admin') tabs.push(['order','Place Order']);
+  tabs.push(['myorders','My Orders']);
+  if(role==='driver'||role==='admin') tabs.push(['manifest','Manifest']);
+  if(role==='admin') tabs.push(['admin','Admin']);
+  nav.innerHTML = tabs.map(([id,label])=>`<button class="nav-btn" onclick="showPanel('${id}',this)">${label}</button>`).join('');
+}
+
+function showPanel(name, el) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  if(el) el.classList.add('active');
+  // Load panel data
+  if(name==='order') loadOrderPanel();
+  if(name==='myorders') loadMyOrders();
+  if(name==='manifest') loadManifestPanel();
+  if(name==='admin') loadAdminPanel();
+}
+
+// ── ORDER PANEL ───────────────────────────────────────────
+function loadOrderPanel() {
+  // Show delivery runs to/from this location
+  const myLocId = currentProfile?.location_id;
+  const myRuns = allRuns.filter(r => r.to_location_id === myLocId || currentProfile?.role==='admin');
+  const now = new Date();
+  const nowTime = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+
+  const el = document.getElementById('order-run-select');
+  if(!myRuns.length){el.innerHTML='<p class="empty">No delivery runs are scheduled for your location.</p>';return;}
+
+  el.innerHTML = '<div class="section-label">Select a delivery run</div>' +
+    myRuns.map(r => {
+      const isPast = r.cutoff_time <= nowTime;
+      const badge = isPast ? `<span class="badge bwarn">Cutoff passed</span>` : `<span class="badge bok">Open</span>`;
+      return `<div class="run-card" style="cursor:pointer" onclick="selectRun('${r.id}')">
+        <h4>${r.from_loc.name} → ${r.to_loc.name}: ${r.run_label} ${badge}</h4>
+        <p>Order by ${r.cutoff_time} · Dispatch ${r.dispatch_time}</p>
+      </div>`;
+    }).join('');
+}
+
+async function selectRun(runId) {
+  selectedRunId = runId;
+  const run = allRuns.find(r=>r.id===runId);
+  orderQtys = {};
+
+  // Get products stocked at the FROM location of this run
+  const fulfillLocId = run.from_location_id;
+  const stockedProdIds = allProdFulfill
+    .filter(pf=>pf.location_id===fulfillLocId && pf.in_stock)
+    .map(pf=>pf.product_id);
+  const available = allProducts.filter(p=>stockedProdIds.includes(p.id));
+
+  if(!available.length){
+    document.getElementById('order-form-wrap').style.display='none';
+    document.getElementById('order-run-select').innerHTML += '<p class="empty">No products are stocked at this fulfillment center.</p>';
+    return;
+  }
+
+  // Group by category
+  const byCat = {};
+  for(const p of available){
+    const cat = p.category?.name||'Other';
+    if(!byCat[cat]) byCat[cat]=[];
+    byCat[cat].push(p);
+    orderQtys[p.id]=0;
+  }
+
+  const el = document.getElementById('order-items-list');
+  el.innerHTML = Object.entries(byCat).map(([cat,prods])=>
+    `<div class="section-label">${cat}</div>` +
+    prods.map(p=>`
+      <div class="order-item-row">
+        <span class="name">${p.name}</span>
+        <span class="unit">${p.unit}</span>
+        <div class="qty-control">
+          <button class="qty-btn" onclick="changeQty('${p.id}',-1)">−</button>
+          <input class="qty-input" type="number" min="0" id="qty-${p.id}" value="0" onchange="orderQtys['${p.id}']=parseFloat(this.value)||0"/>
+          <button class="qty-btn" onclick="changeQty('${p.id}',1)">+</button>
+        </div>
+      </div>`).join('')
+  ).join('');
+
+  document.getElementById('order-form-wrap').style.display='block';
+}
+
+function changeQty(prodId, delta) {
+  const input = document.getElementById('qty-'+prodId);
+  const val = Math.max(0, (parseFloat(input.value)||0)+delta);
+  input.value = val;
+  orderQtys[prodId] = val;
+}
+
+function clearOrderForm() {
+  Object.keys(orderQtys).forEach(id=>{orderQtys[id]=0;const el=document.getElementById('qty-'+id);if(el)el.value=0;});
+  document.getElementById('order-notes').value='';
+}
+
+async function submitOrder() {
+  const items = Object.entries(orderQtys).filter(([,q])=>q>0);
+  if(!items.length){setStatus('order-status','Add at least one item.','err');return;}
+  setStatus('order-status','<span class="spin"></span> Placing order…','info');
+  try {
+    const run = allRuns.find(r=>r.id===selectedRunId);
+    const today = new Date().toISOString().split('T')[0];
+    const { data: order, error } = await sb.from('orders').insert({
+      ordering_location_id: currentProfile.location_id,
+      delivery_run_id: selectedRunId,
+      placed_by: currentUser.id,
+      scheduled_date: today,
+      notes: document.getElementById('order-notes').value||null,
+      status: 'pending'
+    }).select().single();
+    if(error) throw error;
+
+    const lineItems = items.map(([product_id,quantity])=>({order_id:order.id,product_id,quantity}));
+    const { error: itemErr } = await sb.from('order_items').insert(lineItems);
+    if(itemErr) throw itemErr;
+
+    setStatus('order-status','Order placed!','ok');
+    clearOrderForm();
+    selectedRunId=null;
+    document.getElementById('order-form-wrap').style.display='none';
+    loadOrderPanel();
+  } catch(e) { setStatus('order-status','Error: '+e.message,'err'); }
+}
+
+// ── MY ORDERS ─────────────────────────────────────────────
+async function loadMyOrders() {
+  const el = document.getElementById('my-orders-list');
+  el.innerHTML='<span class="spin"></span> Loading…';
+  const { data, error } = await sb.from('orders')
+    .select('*,run:delivery_runs(run_label,from_loc:locations!from_location_id(name)),items:order_items(quantity,picked,oos,product:products(name,unit))')
+    .eq('placed_by', currentUser.id)
+    .order('created_at',{ascending:false})
+    .limit(20);
+  if(error||!data?.length){el.innerHTML='<p class="empty">No orders yet.</p>';return;}
+
+  el.innerHTML = data.map(o=>{
+    const statusBadge = {pending:'binfo',picking:'bwarn',dispatched:'bwarn',delivered:'bok',cancelled:'berr'}[o.status]||'binfo';
+    const items = (o.items||[]).map(i=>`<div style="font-size:12px;color:var(--text2);padding:2px 0">${i.quantity} × ${i.product?.name||'?'} ${i.picked?'✓':''} ${i.oos?'<span class="badge berr">OOS</span>':''}</div>`).join('');
+    return `<div class="run-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <h4>${o.run?.run_label||'Order'} — ${new Date(o.created_at).toLocaleDateString()}</h4>
+        <span class="badge ${statusBadge}">${o.status}</span>
+      </div>
+      ${items}
+      ${o.notes?`<p style="font-size:12px;color:var(--text2);margin-top:6px">Note: ${o.notes}</p>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ── MANIFEST ──────────────────────────────────────────────
+async function loadManifestPanel() {
+  const el = document.getElementById('manifest-run-select');
+  const myLocId = currentProfile?.location_id;
+  // Drivers see runs FROM their location; admins see all
+  const myRuns = currentProfile?.role==='admin' ? allRuns : allRuns.filter(r=>r.from_location_id===myLocId);
+  if(!myRuns.length){el.innerHTML='<p class="empty">No runs assigned to your location.</p>';return;}
+
+  el.innerHTML = '<div class="section-label">Select run to pick</div>' +
+    myRuns.map(r=>`<div class="run-card" style="cursor:pointer" onclick="loadManifest('${r.id}')">
+      <h4>${r.from_loc.name} → ${r.to_loc.name}: ${r.run_label}</h4>
+      <p>Dispatch ${r.dispatch_time}</p>
+    </div>`).join('');
+}
+
+async function loadManifest(runId) {
+  const wrap = document.getElementById('manifest-wrap');
+  wrap.innerHTML='<span class="spin"></span> Loading orders…';
+  const today = new Date().toISOString().split('T')[0];
+  const { data, error } = await sb.from('orders')
+    .select('*,ordering_loc:locations!ordering_location_id(name),items:order_items(*,product:products(name,unit))')
+    .eq('delivery_run_id', runId)
+    .eq('scheduled_date', today)
+    .in('status',['pending','picking']);
+
+  if(error){wrap.innerHTML='<p class="empty">Error loading manifest.</p>';return;}
+  if(!data?.length){wrap.innerHTML='<p class="empty">No orders for this run today.</p>';return;}
+
+  // Aggregate items across all orders for this run, grouped by store
+  wrap.innerHTML = data.map(order=>{
+    const items = (order.items||[]);
+    if(!items.length) return '';
+    return `<div class="card">
+      <div class="card-title">
+        ${order.ordering_loc?.name||'Unknown'}
+        <span class="badge binfo">${items.length} item${items.length!==1?'s':''}</span>
+        <span class="badge ${order.status==='picking'?'bwarn':'binfo'}">${order.status}</span>
+      </div>
+      <div id="manifest-items-${order.id}">
+        ${items.map(item=>renderManifestItem(item, order.id)).join('')}
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btnp btnsm" onclick="markAllPicked('${order.id}')">Mark all picked</button>
+        <button class="btn btnsm" onclick="dispatchOrder('${order.id}')">Dispatch →</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderManifestItem(item, orderId) {
+  const cls = item.picked?'picked':item.oos?'oos':'';
+  return `<div class="manifest-item ${cls}" id="mitem-${item.id}">
+    <div class="check ${item.picked?'checked':''}" onclick="togglePicked('${item.id}','${orderId}',${!item.picked})">${item.picked?'✓':''}</div>
+    <div style="flex:1">
+      <div class="item-name">${item.product?.name||'?'}</div>
+      <div class="item-meta">${item.product?.unit||''} ${item.oos?'<span class="badge berr">Out of stock</span>':''} ${item.rolled_over?'<span class="badge bwarn">Rolled over</span>':''}</div>
+    </div>
+    <div class="item-qty">${item.quantity}</div>
+    ${!item.picked&&!item.oos?`<button class="btn btnsm btndanger" onclick="markOOS('${item.id}','${orderId}')">OOS</button>`:''}
+  </div>`;
+}
+
+async function togglePicked(itemId, orderId, picked) {
+  await sb.from('order_items').update({picked}).eq('id',itemId);
+  refreshManifestItem(itemId, orderId);
+}
+
+async function markOOS(itemId, orderId) {
+  if(!confirm('Mark this item as out of stock? It will be removed from this order.')) return;
+  await sb.from('order_items').update({oos:true, picked:false}).eq('id',itemId);
+  refreshManifestItem(itemId, orderId);
+}
+
+async function refreshManifestItem(itemId, orderId) {
+  const { data } = await sb.from('order_items').select('*,product:products(name,unit)').eq('id',itemId).single();
+  if(data) document.getElementById('mitem-'+itemId).outerHTML = renderManifestItem(data, orderId);
+}
+
+async function markAllPicked(orderId) {
+  await sb.from('order_items').update({picked:true}).eq('order_id',orderId).eq('oos',false);
+  await sb.from('orders').update({status:'picking'}).eq('id',orderId);
+  // Refresh the items list
+  const { data } = await sb.from('orders')
+    .select('*,ordering_loc:locations!ordering_location_id(name),items:order_items(*,product:products(name,unit))')
+    .eq('id',orderId).single();
+  if(data) {
+    document.getElementById('manifest-items-'+orderId).innerHTML =
+      (data.items||[]).map(item=>renderManifestItem(item,orderId)).join('');
+  }
+}
+
+async function dispatchOrder(orderId) {
+  // Roll over any unpicked, non-OOS items to next run
+  const { data: unpicked } = await sb.from('order_items')
+    .select('*').eq('order_id',orderId).eq('picked',false).eq('oos',false);
+  if(unpicked?.length) {
+    // Mark them rolled over on the current order
+    await sb.from('order_items').update({rolled_over:true})
+      .eq('order_id',orderId).eq('picked',false).eq('oos',false);
+  }
+  await sb.from('orders').update({status:'dispatched'}).eq('id',orderId);
+  alert('Order dispatched!' + (unpicked?.length ? ` ${unpicked.length} item(s) rolled over to next run.`:''));
+  loadManifestPanel();
+  document.getElementById('manifest-wrap').innerHTML='';
+}
+
+// ── ADMIN ─────────────────────────────────────────────────
+function showAdminTab(name, el) {
+  document.querySelectorAll('.admin-sub-panel').forEach(p=>p.style.display='none');
+  document.querySelectorAll('.active-admin-tab').forEach(b=>b.classList.remove('active-admin-tab'));
+  document.getElementById('admin-'+name).style.display='block';
+  if(el){el.classList.add('active-admin-tab');}
+}
+
+async function loadAdminPanel() {
+  populateCategorySelect('prod-cat');
+  populateLocationSelect('inv-loc');
+  populateLocationSelect('run-from', true);
+  populateLocationSelect('run-to', false);
+
+  // Fulfillment checkboxes for new product
+  const fulfillLocs = allLocations.filter(l=>l.can_fulfill);
+  document.getElementById('prod-locations').innerHTML = fulfillLocs.map(l=>
+    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+      <input type="checkbox" value="${l.id}" id="fl-${l.id}"/> ${l.name}
+    </label>`).join('');
+
+  loadProductsTable();
+  loadRunsTable();
+  loadUsersTable();
+  loadAllOrders();
+}
+
+function populateCategorySelect(elId) {
+  document.getElementById(elId).innerHTML = allCategories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+function populateLocationSelect(elId, fulfillOnly=null) {
+  let locs = allLocations;
+  if(fulfillOnly===true) locs = locs.filter(l=>l.can_fulfill);
+  if(fulfillOnly===false) locs = locs.filter(l=>l.can_order);
+  document.getElementById(elId).innerHTML = locs.map(l=>`<option value="${l.id}">${l.name}</option>`).join('');
+}
+
+async function addProduct() {
+  const name = document.getElementById('prod-name').value.trim();
+  const category_id = document.getElementById('prod-cat').value;
+  const unit = document.getElementById('prod-unit').value;
+  const fulfillLocIds = [...document.querySelectorAll('#prod-locations input:checked')].map(c=>c.value);
+  if(!name){setStatus('prod-status','Enter a product name.','err');return;}
+  setStatus('prod-status','<span class="spin"></span> Adding…','info');
+  const { data: prod, error } = await sb.from('products').insert({name,category_id,unit}).select().single();
+  if(error){setStatus('prod-status','Error: '+error.message,'err');return;}
+  if(fulfillLocIds.length) {
+    await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:prod.id,location_id})));
+  }
+  setStatus('prod-status','Product added!','ok');
+  document.getElementById('prod-name').value='';
+  document.querySelectorAll('#prod-locations input').forEach(c=>c.checked=false);
+  await loadGlobalData();
+  loadProductsTable();
+}
+
+function loadProductsTable() {
+  const el = document.getElementById('products-table');
+  if(!allProducts.length){el.innerHTML='<p class="empty">No products yet.</p>';return;}
+  const byCat = {};
+  for(const p of allProducts){
+    const cat=p.category?.name||'Other';
+    if(!byCat[cat]) byCat[cat]=[];
+    byCat[cat].push(p);
+  }
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Product</th><th>Unit</th><th>Stocked at</th><th>Status</th><th></th></tr></thead><tbody>' +
+    Object.entries(byCat).map(([cat,prods])=>
+      `<tr class="tbl-section"><td colspan="5">${cat}</td></tr>` +
+      prods.map(p=>{
+        const locs = (p.fulfillment||[]).map(f=>{
+          const loc=allLocations.find(l=>l.id===f.location_id);
+          return `<span class="chip">${loc?.short_code||'?'}</span>`;
+        }).join('');
+        return `<tr>
+          <td><strong>${p.name}</strong></td>
+          <td>${p.unit}</td>
+          <td>${locs||'<span style="color:var(--text3)">None</span>'}</td>
+          <td><span class="badge ${p.active?'bok':'berr'}">${p.active?'Active':'Inactive'}</span></td>
+          <td><button class="btn btnsm btndanger" onclick="toggleProduct('${p.id}',${!p.active})">${p.active?'Deactivate':'Activate'}</button></td>
+        </tr>`;
+      }).join('')
+    ).join('') +
+    '</tbody></table>';
+}
+
+async function toggleProduct(id, active) {
+  await sb.from('products').update({active}).eq('id',id);
+  await loadGlobalData();
+  loadProductsTable();
+}
+
+async function addRun() {
+  const from = document.getElementById('run-from').value;
+  const to = document.getElementById('run-to').value;
+  const label = document.getElementById('run-label').value.trim();
+  const cutoff = document.getElementById('run-cutoff').value;
+  const dispatch = document.getElementById('run-dispatch').value;
+  if(!label){setStatus('run-status','Enter a run label.','err');return;}
+  if(from===to){setStatus('run-status','From and To must be different locations.','err');return;}
+  const { error } = await sb.from('delivery_runs').insert({from_location_id:from,to_location_id:to,run_label:label,cutoff_time:cutoff,dispatch_time:dispatch});
+  if(error){setStatus('run-status','Error: '+error.message,'err');return;}
+  setStatus('run-status','Run added!','ok');
+  document.getElementById('run-label').value='';
+  await loadGlobalData();
+  loadRunsTable();
+}
+
+function loadRunsTable() {
+  const el = document.getElementById('runs-table');
+  if(!allRuns.length){el.innerHTML='<p class="empty">No runs configured yet.</p>';return;}
+  el.innerHTML='<table class="tbl"><thead><tr><th>From</th><th>To</th><th>Label</th><th>Cutoff</th><th>Dispatch</th><th></th></tr></thead><tbody>'+
+    allRuns.map(r=>`<tr>
+      <td>${r.from_loc?.name||'?'}</td><td>${r.to_loc?.name||'?'}</td>
+      <td>${r.run_label}</td><td>${r.cutoff_time}</td><td>${r.dispatch_time}</td>
+      <td><button class="btn btnsm btndanger" onclick="deactivateRun('${r.id}')">Remove</button></td>
+    </tr>`).join('')+
+    '</tbody></table>';
+}
+
+async function deactivateRun(id) {
+  if(!confirm('Remove this delivery run?')) return;
+  await sb.from('delivery_runs').update({active:false}).eq('id',id);
+  await loadGlobalData();
+  loadRunsTable();
+}
+
+async function inviteUser() {
+  const name = document.getElementById('inv-name').value.trim();
+  const email = document.getElementById('inv-email').value.trim();
+  const pass = document.getElementById('inv-pass').value;
+  const role = document.getElementById('inv-role').value;
+  const location_id = document.getElementById('inv-loc').value;
+  if(!name||!email||!pass){setStatus('inv-status','Fill in all fields.','err');return;}
+  if(pass.length<6){setStatus('inv-status','Password must be at least 6 characters.','err');return;}
+  setStatus('inv-status','<span class="spin"></span> Creating account…','info');
+  // Create auth user via Supabase Admin API — requires service role key
+  // For now we use signUp which sends a confirmation email
+  const { data, error } = await sb.auth.signUp({email, password:pass, options:{data:{full_name:name}}});
+  if(error){setStatus('inv-status','Error: '+error.message,'err');return;}
+  if(data.user) {
+    await sb.from('profiles').upsert({id:data.user.id,full_name:name,role,location_id});
+  }
+  setStatus('inv-status',`Account created for ${name}. They'll receive a confirmation email.`,'ok');
+  document.getElementById('inv-name').value='';
+  document.getElementById('inv-email').value='';
+  document.getElementById('inv-pass').value='';
+  loadUsersTable();
+}
+
+async function loadUsersTable() {
+  const { data } = await sb.from('profiles').select('*,location:locations(name)').order('full_name');
+  const el = document.getElementById('users-table');
+  if(!data?.length){el.innerHTML='<p class="empty">No users yet.</p>';return;}
+  el.innerHTML='<table class="tbl"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Status</th></tr></thead><tbody>'+
+    data.map(u=>`<tr>
+      <td><strong>${u.full_name}</strong></td>
+      <td><span class="badge ${u.role==='admin'?'bpurp':u.role==='driver'?'binfo':'bok'}">${u.role}</span></td>
+      <td>${u.location?.name||'—'}</td>
+      <td><span class="badge ${u.active?'bok':'berr'}">${u.active?'Active':'Inactive'}</span></td>
+    </tr>`).join('')+
+    '</tbody></table>';
+}
+
+async function loadAllOrders() {
+  const { data } = await sb.from('orders')
+    .select('*,ordering_loc:locations!ordering_location_id(name),run:delivery_runs(run_label),items:order_items(id,picked,oos)')
+    .order('created_at',{ascending:false}).limit(50);
+  const el = document.getElementById('all-orders-list');
+  if(!data?.length){el.innerHTML='<p class="empty">No orders yet.</p>';return;}
+  el.innerHTML='<table class="tbl"><thead><tr><th>Date</th><th>Store</th><th>Run</th><th>Items</th><th>Status</th></tr></thead><tbody>'+
+    data.map(o=>{
+      const picked=(o.items||[]).filter(i=>i.picked).length;
+      const total=(o.items||[]).length;
+      const badge={pending:'binfo',picking:'bwarn',dispatched:'bwarn',delivered:'bok',cancelled:'berr'}[o.status]||'binfo';
+      return`<tr>
+        <td>${new Date(o.created_at).toLocaleDateString()}</td>
+        <td>${o.ordering_loc?.name||'?'}</td>
+        <td>${o.run?.run_label||'?'}</td>
+        <td>${picked}/${total} picked</td>
+        <td><span class="badge ${badge}">${o.status}</span></td>
+      </tr>`;
+    }).join('')+
+    '</tbody></table>';
+}
+
+// ── HELPERS ───────────────────────────────────────────────
+function setStatus(id,msg,type){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.innerHTML=msg?`<div class="status s${type}">${msg}</div>`:'';
+}
+
+// ── BOOT ──────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
