@@ -177,7 +177,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
       <div id="order-form-wrap" style="display:none">
         <div class="card">
-          <div class="card-title">Select items <span style="font-size:12px;font-weight:400;color:var(--text2)" id="order-route-hint"></span></div>
+          <div class="card-title">Select items</div>
           <div id="order-items-list"></div>
         </div>
         <div class="card">
@@ -200,9 +200,16 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
     <!-- MANIFEST panel -->
     <div id="panel-manifest" class="panel">
-      <div class="card">
-        <div class="card-title">Pick manifest</div>
-        <div id="manifest-route-select"></div>
+      <div class="card" style="padding:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:14px;font-weight:600">Pick manifest</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btnsm" onclick="shiftManifestDate(-1)">← Prev</button>
+            <span id="manifest-date-label" style="font-size:13px;font-weight:500;min-width:120px;text-align:center"></span>
+            <button class="btn btnsm" onclick="shiftManifestDate(1)">Next →</button>
+          </div>
+        </div>
+        <div id="manifest-route-select" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px"></div>
       </div>
       <div id="manifest-wrap"></div>
     </div>
@@ -479,16 +486,30 @@ function loadOrderPanel() {
   }
 }
 
-function loadOrderItems() {
+async function loadOrderItems() {
   const destLocId = document.getElementById('order-dest').value;
   if(!destLocId){document.getElementById('order-form-wrap').style.display='none';return;}
 
   orderQtys = {};
-  // Show all active products; hint which route each will go on
   const available = allProducts.filter(p=>p.active);
-  if(!available.length){
-    document.getElementById('order-form-wrap').style.display='none';
-    return;
+  if(!available.length){document.getElementById('order-form-wrap').style.display='none';return;}
+
+  // Fetch already-ordered quantities for this destination (pending/picking only)
+  const { data: existingOrders } = await sb.from('orders')
+    .select('id')
+    .eq('ordering_location_id', destLocId)
+    .in('status',['pending','picking']);
+  const existingOrderIds = (existingOrders||[]).map(o=>o.id);
+  const pendingQtys = {}; // productId -> total qty already on order
+  if(existingOrderIds.length){
+    const { data: existingItems } = await sb.from('order_items')
+      .select('product_id,quantity,oos')
+      .in('order_id', existingOrderIds)
+      .eq('oos', false)
+      .eq('picked', false);
+    for(const item of existingItems||[]){
+      pendingQtys[item.product_id] = (pendingQtys[item.product_id]||0) + Number(item.quantity);
+    }
   }
 
   const byCat = {};
@@ -499,24 +520,30 @@ function loadOrderItems() {
     orderQtys[p.id]=0;
   }
 
-  const hint = document.getElementById('order-route-hint');
-  const nextRoute = findNextRoute(destLocId, null);
-  hint.textContent = nextRoute
-    ? `Items will be assigned to ${nextRoute.route.name} on ${nextRoute.date}`
-    : 'No route found for this destination';
-
   const el = document.getElementById('order-items-list');
-  el.innerHTML = Object.entries(byCat).map(([cat,prods])=>
+  // Build header row
+  el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--border);margin-bottom:4px">
+    <span style="flex:1;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px">Item</span>
+    <span style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;min-width:60px;text-align:center">On order</span>
+    <span style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;min-width:110px;text-align:center">Add qty</span>
+  </div>` +
+  Object.entries(byCat).map(([cat,prods])=>
     `<div class="section-label">${cat}</div>` +
     prods.map(p=>{
       const nr = findNextRoute(destLocId, p.id);
-      const routeHint = nr ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>` : `<span style="font-size:11px;color:var(--err)">No route</span>`;
+      const routeHint = nr
+        ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>`
+        : `<span style="font-size:11px;color:var(--err)">No route</span>`;
+      const alreadyOrdered = pendingQtys[p.id]||0;
+      const onOrderBadge = alreadyOrdered > 0
+        ? `<span style="min-width:60px;text-align:center;font-size:13px;font-weight:600;color:var(--warn)">${alreadyOrdered} ${p.unit}</span>`
+        : `<span style="min-width:60px;text-align:center;font-size:13px;color:var(--text3)">—</span>`;
       return `<div class="order-item-row">
         <div style="flex:1">
           <span class="name">${p.name}</span>
           <div>${routeHint}</div>
         </div>
-        <span class="unit">${p.unit}</span>
+        ${onOrderBadge}
         <div class="qty-control">
           <button class="qty-btn" onclick="changeQty('${p.id}',-1)">−</button>
           <input class="qty-input" type="number" min="0" id="qty-${p.id}" value="0" onchange="orderQtys['${p.id}']=parseFloat(this.value)||0"/>
@@ -601,15 +628,66 @@ async function loadMyOrders() {
 }
 
 // ── MANIFEST ──────────────────────────────────────────────
+let manifestDate = new Date();
+let activeManifestRouteId = null;
+
 function loadManifestPanel() {
+  // Default to today
+  manifestDate = new Date();
+  renderManifestDateAndRoutes();
+}
+
+function shiftManifestDate(delta) {
+  manifestDate.setDate(manifestDate.getDate() + delta);
+  activeManifestRouteId = null;
+  document.getElementById('manifest-wrap').innerHTML = '';
+  renderManifestDateAndRoutes();
+}
+
+function renderManifestDateAndRoutes() {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const target = new Date(manifestDate);
+  target.setHours(0,0,0,0);
+  const diffDays = Math.round((target - today) / 86400000);
+
+  const dateStr = target.toISOString().split('T')[0];
+  const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : diffDays === -1 ? 'Yesterday'
+    : target.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  document.getElementById('manifest-date-label').textContent = dayLabel;
+
   const el = document.getElementById('manifest-route-select');
   if(!allRoutes.length){el.innerHTML='<p class="empty">No routes configured yet.</p>';return;}
-  const today = new Date().toISOString().split('T')[0];
-  el.innerHTML = '<div class="section-label">Select route</div>' +
-    allRoutes.map(r=>`<div class="run-card" style="cursor:pointer" onclick="loadManifest('${r.id}','${today}')">
-      <h4>${r.name} <span class="badge binfo">today</span></h4>
-      <p>Cutoff ${r.cutoff_time} · Dispatch ${r.dispatch_time}</p>
-    </div>`).join('');
+
+  el.innerHTML = allRoutes.map(r=>{
+    const isActive = r.id === activeManifestRouteId;
+    const isToday = diffDays === 0;
+    return `<div onclick="selectManifestRoute('${r.id}','${dateStr}')"
+      style="cursor:pointer;flex-shrink:0;padding:10px 16px;border-radius:var(--radius-lg);border:2px solid ${isActive?'var(--info)':'var(--border)'};background:${isActive?'var(--info-bg)':'var(--bg)'};transition:all .15s">
+      <div style="font-size:14px;font-weight:600;color:${isActive?'var(--info)':'var(--text)'}">${r.name}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px">Cutoff ${r.cutoff_time}</div>
+      ${isToday&&r.cutoff_time<=new Date().toTimeString().slice(0,5)?'<div style="font-size:11px;color:var(--warn);margin-top:1px">Cutoff passed</div>':''}
+    </div>`;
+  }).join('');
+
+  // Auto-select first route
+  if(!activeManifestRouteId && allRoutes.length) {
+    selectManifestRoute(allRoutes[0].id, dateStr);
+  }
+}
+
+function selectManifestRoute(routeId, dateStr) {
+  activeManifestRouteId = routeId;
+  // Re-render route pills to show active state
+  const el = document.getElementById('manifest-route-select');
+  el.querySelectorAll('[onclick]').forEach((pill,i)=>{
+    const r = allRoutes[i];
+    const isActive = r && r.id === routeId;
+    pill.style.borderColor = isActive ? 'var(--info)' : 'var(--border)';
+    pill.style.background = isActive ? 'var(--info-bg)' : 'var(--bg)';
+    pill.querySelector('div').style.color = isActive ? 'var(--info)' : 'var(--text)';
+  });
+  loadManifest(routeId, dateStr);
 }
 
 async function loadManifest(routeId, date) {
@@ -753,8 +831,9 @@ async function markRouteDispatched(routeId, date){
   }
   await sb.from('orders').update({status:'dispatched'}).in('id',orders.map(o=>o.id));
   alert(`Route dispatched!${rolledCount?' '+rolledCount+' item(s) rolled to next run.':''}`);
-  loadManifestPanel();
+  activeManifestRouteId = null;
   document.getElementById('manifest-wrap').innerHTML='';
+  renderManifestDateAndRoutes();
 }
 
 // ── ADMIN ─────────────────────────────────────────────────
@@ -764,6 +843,7 @@ function showAdminTab(name, el) {
   document.getElementById('admin-'+name).style.display='block';
   if(el){el.classList.add('active-admin-tab');}
   if(name==='routes') loadRoutesAdmin();
+  if(name==='products') { renderProdFormCheckboxes(); loadProductsTable(); }
 }
 
 async function loadAdminPanel() {
@@ -773,24 +853,31 @@ async function loadAdminPanel() {
   populateLocationSelect('run-from', true);
   populateLocationSelect('run-to', false);
 
-  // Fulfillment checkboxes for new product
-  const fulfillLocs = allLocations.filter(l=>l.can_fulfill);
-  document.getElementById('prod-locations').innerHTML = fulfillLocs.map(l=>
-    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-      <input type="checkbox" value="${l.id}" id="fl-${l.id}"/> ${l.name}
-    </label>`).join('');
-  // Route checkboxes for new product
-  document.getElementById('prod-runs').innerHTML = allRoutes.length
-    ? allRoutes.map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-        <input type="checkbox" value="${r.id}"/> ${r.name}
-      </label>`).join('')
-    : '<span style="font-size:12px;color:var(--text3)">No routes configured yet — add them in the Routes tab first.</span>';
+  renderProdFormCheckboxes();
 
+  renderProdFormCheckboxes();
   loadProductsTable();
   loadRoutesAdmin();
   loadUsersTable();
   loadAllOrders();
   loadCatalogSettings();
+}
+
+function renderProdFormCheckboxes() {
+  const locEl = document.getElementById('prod-locations');
+  const runEl = document.getElementById('prod-runs');
+  if(!locEl || !runEl) return;
+  const fulfillLocs = allLocations.filter(l=>l.can_fulfill);
+  locEl.innerHTML = fulfillLocs.length
+    ? fulfillLocs.map(l=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px">
+        <input type="checkbox" value="${l.id}"/> ${l.name}
+      </label>`).join('')
+    : '<span style="font-size:12px;color:var(--text3)">No locations found.</span>';
+  runEl.innerHTML = allRoutes.length
+    ? allRoutes.map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px">
+        <input type="checkbox" value="${r.id}"/> ${r.name}
+      </label>`).join('')
+    : '<span style="font-size:12px;color:var(--text3)">No routes yet — add in Routes tab first.</span>';
 }
 
 function populateCategorySelect(elId) {
