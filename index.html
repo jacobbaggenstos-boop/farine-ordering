@@ -212,6 +212,10 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
             <label>Stocked at (fulfillment centers)</label>
             <div id="prod-locations" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
           </div>
+          <div class="fg" style="margin-bottom:12px">
+            <label>Available on delivery runs</label>
+            <div id="prod-runs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
           <div id="prod-status"></div>
           <button class="btn btnp" onclick="addProduct()">Add product</button>
         </div>
@@ -337,17 +341,21 @@ async function loadGlobalData() {
   const [locs, cats, prods, runs, pf, units] = await Promise.all([
     sb.from('locations').select('*').order('name'),
     sb.from('categories').select('*').order('sort_order'),
-    sb.from('products').select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock)').eq('active',true).order('name'),
+    sb.from('products').select('id').limit(1), // placeholder — products fetched below with run data
     sb.from('delivery_runs').select('*,from_loc:locations!from_location_id(*),to_loc:locations!to_location_id(*)').eq('active',true).order('dispatch_time'),
     sb.from('product_fulfillment').select('*'),
     sb.from('units').select('*').order('name'),
   ]);
   allLocations = locs.data||[];
   allCategories = cats.data||[];
-  allProducts = prods.data||[];
   allRuns = runs.data||[];
   allProdFulfill = pf.data||[];
   allUnits = units.data||[];
+  // Fetch products with run links
+  const { data: prodsWithRuns } = await sb.from('products')
+    .select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock),product_runs(run_id)')
+    .order('name');
+  allProducts = prodsWithRuns||[];
 }
 
 // ── AUTH ──────────────────────────────────────────────────
@@ -673,6 +681,12 @@ async function loadAdminPanel() {
     `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
       <input type="checkbox" value="${l.id}" id="fl-${l.id}"/> ${l.name}
     </label>`).join('');
+  // Delivery run checkboxes for new product
+  document.getElementById('prod-runs').innerHTML = allRuns.length
+    ? allRuns.map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+        <input type="checkbox" value="${r.id}"/> ${r.from_loc?.name}→${r.to_loc?.name}: ${r.run_label}
+      </label>`).join('')
+    : '<span style="font-size:12px;color:var(--text3)">No runs configured yet — add them in Delivery Runs tab first.</span>';
 
   loadProductsTable();
   loadRunsTable();
@@ -800,16 +814,16 @@ async function addProduct() {
   const category_id = document.getElementById('prod-cat').value;
   const unit = document.getElementById('prod-unit').value;
   const fulfillLocIds = [...document.querySelectorAll('#prod-locations input:checked')].map(c=>c.value);
+  const runIds = [...document.querySelectorAll('#prod-runs input:checked')].map(c=>c.value);
   if(!name){setStatus('prod-status','Enter a product name.','err');return;}
   setStatus('prod-status','<span class="spin"></span> Adding…','info');
   const { data: prod, error } = await sb.from('products').insert({name,category_id,unit}).select().single();
   if(error){setStatus('prod-status','Error: '+error.message,'err');return;}
-  if(fulfillLocIds.length) {
-    await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:prod.id,location_id})));
-  }
+  if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:prod.id,location_id})));
+  if(runIds.length) await sb.from('product_runs').insert(runIds.map(run_id=>({product_id:prod.id,run_id})));
   setStatus('prod-status','Product added!','ok');
   document.getElementById('prod-name').value='';
-  document.querySelectorAll('#prod-locations input').forEach(c=>c.checked=false);
+  document.querySelectorAll('#prod-locations input, #prod-runs input').forEach(c=>c.checked=false);
   await loadGlobalData();
   loadProductsTable();
 }
@@ -823,20 +837,28 @@ function loadProductsTable() {
     if(!byCat[cat]) byCat[cat]=[];
     byCat[cat].push(p);
   }
-  el.innerHTML = '<table class="tbl"><thead><tr><th>Product</th><th>Unit</th><th>Stocked at</th><th>Status</th><th></th></tr></thead><tbody>' +
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Product</th><th>Unit</th><th>Fulfillment</th><th>Runs</th><th>Status</th><th></th></tr></thead><tbody>' +
     Object.entries(byCat).map(([cat,prods])=>
-      `<tr class="tbl-section"><td colspan="5">${cat}</td></tr>` +
+      `<tr class="tbl-section"><td colspan="6">${cat}</td></tr>` +
       prods.map(p=>{
         const locs = (p.fulfillment||[]).map(f=>{
           const loc=allLocations.find(l=>l.id===f.location_id);
           return `<span class="chip">${loc?.short_code||'?'}</span>`;
         }).join('');
+        const runs = (p.product_runs||[]).map(r=>{
+          const run=allRuns.find(rn=>rn.id===r.run_id);
+          return run?`<span class="chip">${run.run_label}</span>`:'';
+        }).join('');
         return `<tr>
           <td><strong>${p.name}</strong></td>
           <td>${p.unit}</td>
-          <td>${locs||'<span style="color:var(--text3)">None</span>'}</td>
+          <td>${locs||'<span style="color:var(--text3)">—</span>'}</td>
+          <td>${runs||'<span style="color:var(--text3)">—</span>'}</td>
           <td><span class="badge ${p.active?'bok':'berr'}">${p.active?'Active':'Inactive'}</span></td>
-          <td><button class="btn btnsm btndanger" onclick="toggleProduct('${p.id}',${!p.active})">${p.active?'Deactivate':'Activate'}</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn btnsm" onclick="openEditProduct('${p.id}')" style="margin-right:4px">Edit</button>
+            <button class="btn btnsm btndanger" onclick="deleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">Delete</button>
+          </td>
         </tr>`;
       }).join('')
     ).join('') +
@@ -847,6 +869,70 @@ async function toggleProduct(id, active) {
   await sb.from('products').update({active}).eq('id',id);
   await loadGlobalData();
   loadProductsTable();
+}
+
+async function deleteProduct(id, name) {
+  if(!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return;
+  await sb.from('product_fulfillment').delete().eq('product_id',id);
+  await sb.from('product_runs').delete().eq('product_id',id);
+  await sb.from('products').delete().eq('id',id);
+  await loadGlobalData();
+  loadProductsTable();
+}
+
+function openEditProduct(id) {
+  const p = allProducts.find(x=>x.id===id);
+  if(!p) return;
+  const fulfillLocIds = (p.fulfillment||[]).map(f=>f.location_id);
+  const runIds = (p.product_runs||[]).map(r=>r.run_id);
+  const fulfillLocs = allLocations.filter(l=>l.can_fulfill);
+
+  const modal = document.getElementById('edit-modal');
+  document.getElementById('edit-prod-id').value = id;
+  document.getElementById('edit-prod-name').value = p.name;
+  document.getElementById('edit-prod-cat').innerHTML = allCategories.map(c=>`<option value="${c.id}" ${c.id===p.category_id?'selected':''}>${c.name}</option>`).join('');
+  populateUnitSelect('edit-prod-unit');
+  document.getElementById('edit-prod-unit').value = p.unit;
+  document.getElementById('edit-prod-active').checked = p.active;
+
+  document.getElementById('edit-prod-locations').innerHTML = fulfillLocs.map(l=>
+    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+      <input type="checkbox" value="${l.id}" ${fulfillLocIds.includes(l.id)?'checked':''}/> ${l.name}
+    </label>`).join('');
+
+  document.getElementById('edit-prod-runs').innerHTML = allRuns.map(r=>
+    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+      <input type="checkbox" value="${r.id}" ${runIds.includes(r.id)?'checked':''}/> ${r.from_loc?.name}→${r.to_loc?.name}: ${r.run_label}
+    </label>`).join('');
+
+  modal.style.display='flex';
+}
+
+async function saveEditProduct() {
+  const id = document.getElementById('edit-prod-id').value;
+  const name = document.getElementById('edit-prod-name').value.trim();
+  const category_id = document.getElementById('edit-prod-cat').value;
+  const unit = document.getElementById('edit-prod-unit').value;
+  const active = document.getElementById('edit-prod-active').checked;
+  const fulfillLocIds = [...document.querySelectorAll('#edit-prod-locations input:checked')].map(c=>c.value);
+  const runIds = [...document.querySelectorAll('#edit-prod-runs input:checked')].map(c=>c.value);
+  if(!name){setStatus('edit-prod-status','Enter a product name.','err');return;}
+  setStatus('edit-prod-status','<span class="spin"></span> Saving…','info');
+  try {
+    await sb.from('products').update({name,category_id,unit,active}).eq('id',id);
+    await sb.from('product_fulfillment').delete().eq('product_id',id);
+    if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:id,location_id})));
+    await sb.from('product_runs').delete().eq('product_id',id);
+    if(runIds.length) await sb.from('product_runs').insert(runIds.map(run_id=>({product_id:id,run_id})));
+    setStatus('edit-prod-status','Saved!','ok');
+    await loadGlobalData();
+    loadProductsTable();
+    setTimeout(()=>closeEditModal(),800);
+  } catch(e) { setStatus('edit-prod-status','Error: '+e.message,'err'); }
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').style.display='none';
 }
 
 async function addRun() {
@@ -953,5 +1039,42 @@ function setStatus(id,msg,type){
 // ── BOOT ──────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', init);
 </script>
+
+<!-- EDIT PRODUCT MODAL -->
+<div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--bg);border-radius:var(--radius-lg);padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:600">Edit product</div>
+      <button class="btn btnsm" onclick="closeEditModal()">✕ Close</button>
+    </div>
+    <input type="hidden" id="edit-prod-id"/>
+    <div class="row2" style="margin-bottom:12px">
+      <div class="fg"><label>Name</label><input type="text" id="edit-prod-name"/></div>
+      <div class="fg"><label>Unit</label><select id="edit-prod-unit"></select></div>
+    </div>
+    <div class="row2" style="margin-bottom:12px">
+      <div class="fg"><label>Category</label><select id="edit-prod-cat"></select></div>
+      <div class="fg" style="justify-content:flex-end">
+        <label>Active</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:8px;cursor:pointer">
+          <input type="checkbox" id="edit-prod-active"/> Product is active
+        </label>
+      </div>
+    </div>
+    <div class="fg" style="margin-bottom:12px">
+      <label>Stocked at (fulfillment centers)</label>
+      <div id="edit-prod-locations" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+    </div>
+    <div class="fg" style="margin-bottom:16px">
+      <label>Available on delivery runs</label>
+      <div id="edit-prod-runs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+    </div>
+    <div id="edit-prod-status" style="margin-bottom:8px"></div>
+    <div class="btn-row">
+      <button class="btn btnp" onclick="saveEditProduct()">Save changes</button>
+      <button class="btn" onclick="closeEditModal()">Cancel</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
