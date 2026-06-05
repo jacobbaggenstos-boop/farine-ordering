@@ -20,6 +20,12 @@
   --err-bg:#3a1010;--err:#f09595;--warn-bg:#3a2404;--warn:#fac775;
   --purp-bg:#1e1b4a;--purp:#afa9ec;}
 }
+.search-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.search-bar input{flex:1;min-width:160px;font-size:13px}
+.search-bar select{font-size:13px;min-width:140px;flex-shrink:0}
+.pick-loc-header{background:var(--purp-bg);color:var(--purp);font-size:11px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.5px;padding:7px 12px;border-radius:var(--radius);
+  margin:14px 0 6px;display:flex;align-items:center;gap:6px}
 /* Route / manifest extras */
 .route-stop{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)}
 .route-stop:last-child{border-bottom:none}
@@ -178,6 +184,12 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div id="order-form-wrap" style="display:none">
         <div class="card">
           <div class="card-title">Select items</div>
+          <div class="search-bar">
+            <input type="text" id="order-search" placeholder="Search items…" oninput="filterOrderItems()"/>
+            <select id="order-cat-filter" onchange="filterOrderItems()">
+              <option value="">All categories</option>
+            </select>
+          </div>
           <div id="order-items-list"></div>
         </div>
         <div class="card">
@@ -226,15 +238,13 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div id="admin-products" class="admin-sub-panel">
         <div class="card">
           <div class="card-title">Add product</div>
-          <div class="row3">
+          <div class="row2">
             <div class="fg"><label>Name</label><input type="text" id="prod-name" placeholder="e.g. Chocolate Croissant"/></div>
-            <div class="fg"><label>Category</label><select id="prod-cat"></select></div>
-            <div class="fg"><label>Unit</label>
-              <select id="prod-unit">
-                <option>each</option><option>dozen</option><option>tray</option>
-                <option>case</option><option>box</option><option>bag</option><option>loaf</option>
-              </select>
-            </div>
+            <div class="fg"><label>Unit</label><select id="prod-unit"></select></div>
+          </div>
+          <div class="row2">
+            <div class="fg"><label>Order category <span style="font-weight:400;color:var(--text2)">(shown to staff ordering)</span></label><select id="prod-cat"></select></div>
+            <div class="fg"><label>Pick location <span style="font-weight:400;color:var(--text2)">(shown on manifest)</span></label><select id="prod-pick-loc"><option value="">— none —</option></select></div>
           </div>
           <div class="fg" style="margin-bottom:12px">
             <label>Stocked at (fulfillment centers)</label>
@@ -249,6 +259,12 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
         </div>
         <div class="card">
           <div class="card-title">Product catalog</div>
+          <div class="search-bar">
+            <input type="text" id="admin-search" placeholder="Search products…" oninput="loadProductsTable()"/>
+            <select id="admin-cat-filter" onchange="loadProductsTable()">
+              <option value="">All categories</option>
+            </select>
+          </div>
           <div id="products-table"></div>
         </div>
       </div>
@@ -278,6 +294,16 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
               <div id="unit-status" style="margin-top:8px"></div>
             </div>
           </div>
+        </div>
+        <div class="card" style="margin-top:0">
+          <div class="card-title">Pick locations <span class="badge bpurp">manifest grouping</span></div>
+          <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:12px">Where in the fulfillment center each item lives — Cooler, Dry Storage, Bakery Rack, etc. Products are grouped by this on the driver manifest.</div>
+          <div id="pick-loc-list"></div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <input type="text" id="new-pick-loc-name" placeholder="e.g. Cooler" style="flex:1;font-size:13px"/>
+            <button class="btn btnp" onclick="addPickLocation()">Add</button>
+          </div>
+          <div id="pick-loc-status" style="margin-top:8px"></div>
         </div>
       </div>
       <div id="admin-routes" class="admin-sub-panel" style="display:none">
@@ -339,7 +365,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-let allLocations = [], allCategories = [], allProducts = [], allRoutes = [], allRouteStops = [], allProdRoutes = [], allProdFulfill = [], allUnits = [];
+let allLocations = [], allCategories = [], allPickLocations = [], allProducts = [], allRoutes = [], allRouteStops = [], allProdRoutes = [], allProdFulfill = [], allUnits = [];
 let orderQtys = {}; // productId -> qty for current order form
 let selectedRunId = null;
 
@@ -359,9 +385,10 @@ async function loadProfile() {
 }
 
 async function loadGlobalData() {
-  const [locs, cats, pf, units, routes, stops, prodRoutes] = await Promise.all([
+  const [locs, cats, pickLocs, pf, units, routes, stops, prodRoutes] = await Promise.all([
     sb.from('locations').select('*').order('name'),
     sb.from('categories').select('*').order('sort_order'),
+    sb.from('pick_locations').select('*').order('name'),
     sb.from('product_fulfillment').select('*'),
     sb.from('units').select('*').order('name'),
     sb.from('routes').select('*').eq('active',true).order('sort_order'),
@@ -370,13 +397,14 @@ async function loadGlobalData() {
   ]);
   allLocations = locs.data||[];
   allCategories = cats.data||[];
+  allPickLocations = pickLocs.data||[];
   allProdFulfill = pf.data||[];
   allUnits = units.data||[];
   allRoutes = routes.data||[];
   allRouteStops = stops.data||[];
   allProdRoutes = prodRoutes.data||[];
   const { data: prods } = await sb.from('products')
-    .select('*,category:categories(*),fulfillment:product_fulfillment(location_id,in_stock),product_routes(route_id)')
+    .select('*,category:categories(*),pick_location:pick_locations(*),fulfillment:product_fulfillment(location_id,in_stock),product_routes(route_id)')
     .order('name');
   allProducts = prods||[];
 }
@@ -520,40 +548,69 @@ async function loadOrderItems() {
     orderQtys[p.id]=0;
   }
 
+  // Populate category filter
+  const orderCatEl = document.getElementById('order-cat-filter');
+  if(orderCatEl) orderCatEl.innerHTML = '<option value="">All categories</option>' +
+    allCategories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+
+  // Store state for re-filtering without re-fetching
+  window._orderState = { byCat, pendingQtys, destLocId };
+  document.getElementById('order-form-wrap').style.display='block';
+  renderOrderItems();
+}
+
+function filterOrderItems() { renderOrderItems(); }
+
+function renderOrderItems() {
+  const state = window._orderState;
+  if(!state) return;
+  const { byCat, pendingQtys, destLocId } = state;
+  const query = (document.getElementById('order-search')?.value||'').toLowerCase().trim();
+  const catFilter = document.getElementById('order-cat-filter')?.value||'';
+
   const el = document.getElementById('order-items-list');
-  // Build header row
-  el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--border);margin-bottom:4px">
+  const headerRow = `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--border);margin-bottom:4px">
     <span style="flex:1;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px">Item</span>
     <span style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;min-width:60px;text-align:center">On order</span>
     <span style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;min-width:110px;text-align:center">Add qty</span>
-  </div>` +
-  Object.entries(byCat).map(([cat,prods])=>
-    `<div class="section-label">${cat}</div>` +
-    prods.map(p=>{
-      const nr = findNextRoute(destLocId, p.id);
-      const routeHint = nr
-        ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>`
-        : `<span style="font-size:11px;color:var(--err)">No route</span>`;
-      const alreadyOrdered = pendingQtys[p.id]||0;
-      const onOrderBadge = alreadyOrdered > 0
-        ? `<span style="min-width:60px;text-align:center;font-size:13px;font-weight:600;color:var(--warn)">${alreadyOrdered} ${p.unit}</span>`
-        : `<span style="min-width:60px;text-align:center;font-size:13px;color:var(--text3)">—</span>`;
-      return `<div class="order-item-row">
-        <div style="flex:1">
-          <span class="name">${p.name}</span>
-          <div>${routeHint}</div>
-        </div>
-        ${onOrderBadge}
-        <div class="qty-control">
-          <button class="qty-btn" onclick="changeQty('${p.id}',-1)">−</button>
-          <input class="qty-input" type="number" min="0" id="qty-${p.id}" value="0" onchange="orderQtys['${p.id}']=parseFloat(this.value)||0"/>
-          <button class="qty-btn" onclick="changeQty('${p.id}',1)">+</button>
-        </div>
-      </div>`;
-    }).join('')
-  ).join('');
+  </div>`;
 
-  document.getElementById('order-form-wrap').style.display='block';
+  const rows = Object.entries(byCat)
+    .filter(([cat]) => {
+      if(!catFilter) return true;
+      const catObj = allCategories.find(c=>c.name===cat);
+      return catObj && catObj.id===catFilter;
+    })
+    .map(([cat, prods]) => {
+      const filteredProds = prods.filter(p => !query || p.name.toLowerCase().includes(query));
+      if(!filteredProds.length) return '';
+      return `<div class="section-label">${cat}</div>` +
+        filteredProds.map(p=>{
+          const nr = findNextRoute(destLocId, p.id);
+          const routeHint = nr
+            ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>`
+            : `<span style="font-size:11px;color:var(--err)">No route</span>`;
+          const alreadyOrdered = pendingQtys[p.id]||0;
+          const onOrderBadge = alreadyOrdered > 0
+            ? `<span style="min-width:60px;text-align:center;font-size:13px;font-weight:600;color:var(--warn)">${alreadyOrdered} ${p.unit}</span>`
+            : `<span style="min-width:60px;text-align:center;font-size:13px;color:var(--text3)">—</span>`;
+          const currentQty = orderQtys[p.id]||0;
+          return `<div class="order-item-row">
+            <div style="flex:1">
+              <span class="name">${p.name}</span>
+              <div>${routeHint}</div>
+            </div>
+            ${onOrderBadge}
+            <div class="qty-control">
+              <button class="qty-btn" onclick="changeQty('${p.id}',-1)">−</button>
+              <input class="qty-input" type="number" min="0" id="qty-${p.id}" value="${currentQty}" onchange="orderQtys['${p.id}']=parseFloat(this.value)||0"/>
+              <button class="qty-btn" onclick="changeQty('${p.id}',1)">+</button>
+            </div>
+          </div>`;
+        }).join('');
+    }).filter(Boolean).join('');
+
+  el.innerHTML = headerRow + (rows || '<p class="empty">No items match your search.</p>');
 }
 
 function changeQty(prodId, delta) {
@@ -697,7 +754,7 @@ async function loadManifest(routeId, date) {
 
   // Fetch all orders for this route+date
   const { data: orders, error } = await sb.from('orders')
-    .select('*,ordering_loc:locations!ordering_location_id(*),items:order_items(*,product:products(name,unit))')
+    .select('*,ordering_loc:locations!ordering_location_id(*),items:order_items(*,product:products(name,unit,pick_location:pick_locations(name)))')
     .eq('route_id', routeId)
     .eq('scheduled_date', date)
     .in('status',['pending','picking']);
@@ -767,8 +824,22 @@ async function loadManifest(routeId, date) {
   wrap.innerHTML = html;
 }
 
+function renderLegItems(itemsMap, legLocId) {
+  // Group consolidated items by pick location
+  const byPickLoc = {};
+  for(const {item, totalQty, itemIds} of Object.values(itemsMap)) {
+    const pickLocName = item.product?.pick_location?.name || 'No pick location';
+    if(!byPickLoc[pickLocName]) byPickLoc[pickLocName] = [];
+    byPickLoc[pickLocName].push({item, totalQty, itemIds});
+  }
+  const sortedLocs = Object.keys(byPickLoc).sort((a,b) => a==='No pick location'?1:b==='No pick location'?-1:a.localeCompare(b));
+  return sortedLocs.map(locName =>
+    `<div class="pick-loc-header">📍 ${locName}</div>` +
+    byPickLoc[locName].map(({item,totalQty,itemIds}) => renderConsolidatedItem(item,totalQty,itemIds,legLocId)).join('')
+  ).join('');
+}
+
 function renderConsolidatedItem(item, totalQty, itemIds, legLocId){
-  const allPicked = false; // will be checked live
   const idsAttr = itemIds.join(',');
   return `<div class="manifest-item" id="citem-${legLocId}-${item.product_id}">
     <div class="check" onclick="toggleConsolidatedPicked('${legLocId}','${item.product_id}','${idsAttr}',this)">${''}</div>
@@ -880,8 +951,18 @@ function renderProdFormCheckboxes() {
     : '<span style="font-size:12px;color:var(--text3)">No routes yet — add in Routes tab first.</span>';
 }
 
-function populateCategorySelect(elId) {
-  document.getElementById(elId).innerHTML = allCategories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+function populateCategorySelect(elId, withAll=false) {
+  const el = document.getElementById(elId);
+  if(!el) return;
+  const allOpt = withAll ? '<option value="">All categories</option>' : '';
+  el.innerHTML = allOpt + allCategories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+function populatePickLocSelect(elId) {
+  const el = document.getElementById(elId);
+  if(!el) return;
+  el.innerHTML = '<option value="">— none —</option>' +
+    allPickLocations.map(pl=>`<option value="${pl.id}">${pl.name}</option>`).join('');
 }
 
 function populateUnitSelect(elId) {
@@ -896,6 +977,7 @@ function populateUnitSelect(elId) {
 function loadCatalogSettings() {
   loadCatList();
   loadUnitList();
+  loadPickLocList();
 }
 
 function loadCatList() {
@@ -987,6 +1069,47 @@ async function deleteUnit(id) {
   populateUnitSelect('prod-unit');
 }
 
+function loadPickLocList() {
+  const el = document.getElementById('pick-loc-list');
+  if(!el) return;
+  if(!allPickLocations.length){el.innerHTML='<p class="empty">No pick locations yet.</p>';return;}
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Pick location</th><th></th></tr></thead><tbody>' +
+    allPickLocations.map(pl=>`<tr>
+      <td><input type="text" value="${pl.name}" style="font-size:13px;width:100%" onblur="renamePickLoc('${pl.id}',this.value)"/></td>
+      <td><button class="btn btnsm btndanger" onclick="deletePickLoc('${pl.id}')">&#128465;</button></td>
+    </tr>`).join('') +
+    '</tbody></table>';
+}
+
+async function addPickLocation() {
+  const name = document.getElementById('new-pick-loc-name').value.trim();
+  if(!name){setStatus('pick-loc-status','Enter a name.','err');return;}
+  const { error } = await sb.from('pick_locations').insert({name});
+  if(error){setStatus('pick-loc-status','Error: '+error.message,'err');return;}
+  document.getElementById('new-pick-loc-name').value='';
+  setStatus('pick-loc-status','Added!','ok');
+  await loadGlobalData();
+  loadPickLocList();
+  populatePickLocSelect('prod-pick-loc');
+}
+
+async function renamePickLoc(id, name) {
+  if(!name.trim()) return;
+  await sb.from('pick_locations').update({name:name.trim()}).eq('id',id);
+  await loadGlobalData();
+}
+
+async function deletePickLoc(id) {
+  const used = allProducts.find(p=>p.pick_location_id===id);
+  if(used){alert(`Can't delete — "${used.name}" uses this pick location. Update products first.`);return;}
+  if(!confirm('Delete this pick location?')) return;
+  await sb.from('pick_locations').delete().eq('id',id);
+  setStatus('pick-loc-status','Deleted.','ok');
+  await loadGlobalData();
+  loadPickLocList();
+  populatePickLocSelect('prod-pick-loc');
+}
+
 function populateLocationSelect(elId, fulfillOnly=null) {
   let locs = allLocations;
   if(fulfillOnly===true) locs = locs.filter(l=>l.can_fulfill);
@@ -1002,7 +1125,8 @@ async function addProduct() {
   const runIds = [...document.querySelectorAll('#prod-runs input:checked')].map(c=>c.value);
   if(!name){setStatus('prod-status','Enter a product name.','err');return;}
   setStatus('prod-status','<span class="spin"></span> Adding…','info');
-  const { data: prod, error } = await sb.from('products').insert({name,category_id,unit}).select().single();
+  const pick_location_id = document.getElementById('prod-pick-loc').value||null;
+  const { data: prod, error } = await sb.from('products').insert({name,category_id,unit,pick_location_id}).select().single();
   if(error){setStatus('prod-status','Error: '+error.message,'err');return;}
   if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:prod.id,location_id})));
   if(runIds.length) await sb.from('product_routes').insert(runIds.map(route_id=>({product_id:prod.id,route_id})));
@@ -1016,29 +1140,45 @@ async function addProduct() {
 function loadProductsTable() {
   const el = document.getElementById('products-table');
   if(!allProducts.length){el.innerHTML='<p class="empty">No products yet.</p>';return;}
+
+  const searchEl = document.getElementById('admin-search');
+  const catEl = document.getElementById('admin-cat-filter');
+  const query = (searchEl?.value||'').toLowerCase().trim();
+  const catFilter = catEl?.value||'';
+
+  let filtered = allProducts.filter(p=>{
+    const matchName = !query || p.name.toLowerCase().includes(query);
+    const matchCat = !catFilter || p.category_id === catFilter;
+    return matchName && matchCat;
+  });
+
+  if(!filtered.length){el.innerHTML='<p class="empty">No products match your search.</p>';return;}
+
   const byCat = {};
-  for(const p of allProducts){
+  for(const p of filtered){
     const cat=p.category?.name||'Other';
     if(!byCat[cat]) byCat[cat]=[];
     byCat[cat].push(p);
   }
-  el.innerHTML = '<table class="tbl"><thead><tr><th>Product</th><th>Unit</th><th>Fulfillment</th><th>Runs</th><th>Status</th><th></th></tr></thead><tbody>' +
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Product</th><th>Unit</th><th>Pick location</th><th>Fulfillment</th><th>Routes</th><th>Status</th><th></th></tr></thead><tbody>' +
     Object.entries(byCat).map(([cat,prods])=>
-      `<tr class="tbl-section"><td colspan="6">${cat}</td></tr>` +
+      `<tr class="tbl-section"><td colspan="7">${cat}</td></tr>` +
       prods.map(p=>{
         const locs = (p.fulfillment||[]).map(f=>{
           const loc=allLocations.find(l=>l.id===f.location_id);
           return `<span class="chip">${loc?.short_code||'?'}</span>`;
         }).join('');
-        const runs = (p.product_routes||[]).map(r=>{
+        const routes = (p.product_routes||[]).map(r=>{
           const route=allRoutes.find(rn=>rn.id===r.route_id);
           return route?`<span class="chip">${route.name}</span>`:'';
         }).join('');
+        const pickLoc = p.pick_location?.name||'<span style="color:var(--text3)">—</span>';
         return `<tr>
           <td><strong>${p.name}</strong></td>
           <td>${p.unit}</td>
+          <td>${pickLoc}</td>
           <td>${locs||'<span style="color:var(--text3)">—</span>'}</td>
-          <td>${runs||'<span style="color:var(--text3)">—</span>'}</td>
+          <td>${routes||'<span style="color:var(--text3)">—</span>'}</td>
           <td><span class="badge ${p.active?'bok':'berr'}">${p.active?'Active':'Inactive'}</span></td>
           <td style="white-space:nowrap">
             <button class="btn btnsm" onclick="openEditProduct('${p.id}')" style="margin-right:4px">Edit</button>
@@ -1079,6 +1219,8 @@ function openEditProduct(id) {
   populateUnitSelect('edit-prod-unit');
   document.getElementById('edit-prod-unit').value = p.unit;
   document.getElementById('edit-prod-active').checked = p.active;
+  populatePickLocSelect('edit-prod-pick-loc');
+  document.getElementById('edit-prod-pick-loc').value = p.pick_location_id||'';
 
   document.getElementById('edit-prod-locations').innerHTML = fulfillLocs.map(l=>
     `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
@@ -1104,7 +1246,8 @@ async function saveEditProduct() {
   if(!name){setStatus('edit-prod-status','Enter a product name.','err');return;}
   setStatus('edit-prod-status','<span class="spin"></span> Saving…','info');
   try {
-    await sb.from('products').update({name,category_id,unit,active}).eq('id',id);
+    const pick_location_id = document.getElementById('edit-prod-pick-loc').value||null;
+    await sb.from('products').update({name,category_id,unit,active,pick_location_id}).eq('id',id);
     await sb.from('product_fulfillment').delete().eq('product_id',id);
     if(fulfillLocIds.length) await sb.from('product_fulfillment').insert(fulfillLocIds.map(location_id=>({product_id:id,location_id})));
     await sb.from('product_routes').delete().eq('product_id',id);
@@ -1276,8 +1419,9 @@ window.addEventListener('DOMContentLoaded', init);
       <div class="fg"><label>Name</label><input type="text" id="edit-prod-name"/></div>
       <div class="fg"><label>Unit</label><select id="edit-prod-unit"></select></div>
     </div>
-    <div class="row2" style="margin-bottom:12px">
-      <div class="fg"><label>Category</label><select id="edit-prod-cat"></select></div>
+    <div class="row3" style="margin-bottom:12px">
+      <div class="fg"><label>Order category</label><select id="edit-prod-cat"></select></div>
+      <div class="fg"><label>Pick location</label><select id="edit-prod-pick-loc"><option value="">— none —</option></select></div>
       <div class="fg" style="justify-content:flex-end">
         <label>Active</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:8px;cursor:pointer">
