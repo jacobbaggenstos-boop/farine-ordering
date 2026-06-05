@@ -752,9 +752,9 @@ async function loadManifest(routeId, date) {
   wrap.innerHTML = '<div class="card"><span class="spin"></span> Loading manifest…</div>';
   const route = allRoutes.find(r=>r.id===routeId);
 
-  // Fetch all orders for this route+date
+  // Fetch all orders for this route+date with fulfillment source location
   const { data: orders, error } = await sb.from('orders')
-    .select('*,ordering_loc:locations!ordering_location_id(*),items:order_items(*,product:products(name,unit,pick_location:pick_locations(name)))')
+    .select('*,ordering_loc:locations!ordering_location_id(*),items:order_items(*,product:products(name,unit,pick_location_id,pick_location:pick_locations(name),fulfillment:product_fulfillment(location_id,in_stock)))')
     .eq('route_id', routeId)
     .eq('scheduled_date', date)
     .in('status',['pending','picking']);
@@ -764,126 +764,169 @@ async function loadManifest(routeId, date) {
     return;
   }
 
-  // Get stops for this route in order
-  const stops = allRouteStops.filter(s=>s.route_id===routeId).sort((a,b)=>a.stop_order-b.stop_order);
+  // Get stops in order
+  const stops = allRouteStops
+    .filter(s=>s.route_id===routeId)
+    .sort((a,b)=>a.stop_order-b.stop_order);
 
-  // Build legs: consecutive pairs of stops
-  // Leg = {from: stop, to: stop}
-  // For each leg, gather orders whose destination = leg.to location
-  const legs = [];
-  for(let i=0;i<stops.length-1;i++){
-    legs.push({from:stops[i], to:stops[i+1]});
+  if(!stops.length){
+    wrap.innerHTML='<p class="empty" style="padding:24px">No stops configured for this route.</p>';
+    return;
   }
 
-  // Consolidate orders by destination location
-  const byDest = {};
+  // For each order item, determine which stop it should be PICKED UP FROM.
+  // Rule: the fulfillment location for that product that appears earliest in the route stops.
+  // If no fulfillment location is on the route, use the first stop as fallback.
+  function pickupStopIndex(item) {
+    const fulfillLocIds = (item.product?.fulfillment||[])
+      .filter(f=>f.in_stock)
+      .map(f=>f.location_id);
+    let earliest = stops.length; // fallback: after all stops
+    for(let i=0;i<stops.length;i++){
+      if(fulfillLocIds.includes(stops[i].location_id)){
+        earliest = i; break;
+      }
+    }
+    return earliest;
+  }
+
+  // Build per-stop data:
+  // stopData[stopIndex] = { stop, destinations: { destLocId: { loc, items: { prodId: {item,totalQty,itemIds} } } } }
+  const stopData = stops.map(s=>({stop:s, destinations:{}}));
+
   for(const order of orders){
-    const locId = order.ordering_location_id;
-    if(!byDest[locId]) byDest[locId]={loc:order.ordering_loc,orders:[],items:{}};
-    byDest[locId].orders.push(order);
+    const destLocId = order.ordering_location_id;
+    const destLoc = order.ordering_loc;
     for(const item of (order.items||[])){
+      if(item.oos) continue;
+      const si = pickupStopIndex(item);
+      if(si >= stops.length) continue; // no fulfillment location on this route
+      const sd = stopData[si];
+      if(!sd.destinations[destLocId])
+        sd.destinations[destLocId] = {loc:destLoc, items:{}, orderIds:new Set()};
+      const dest = sd.destinations[destLocId];
       const pid = item.product_id;
-      if(!byDest[locId].items[pid]) byDest[locId].items[pid]={item,totalQty:0,itemIds:[]};
-      byDest[locId].items[pid].totalQty += Number(item.quantity);
-      byDest[locId].items[pid].itemIds.push(item.id);
+      if(!dest.items[pid]) dest.items[pid]={item,totalQty:0,itemIds:[]};
+      dest.items[pid].totalQty += Number(item.quantity);
+      dest.items[pid].itemIds.push(item.id);
+      dest.orderIds.add(order.id);
     }
   }
 
-  // Render: route header then legs
+  const dateLabel = new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
   let html = `<div class="manifest-section">
     <div class="manifest-section-header">
-      <span>${route.name} — ${new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+      <span>${route.name} — ${dateLabel}</span>
       <button class="btn btnsm btnp" onclick="markRouteDispatched('${routeId}','${date}')">Dispatch all →</button>
     </div>`;
 
-  if(!legs.length){
-    html += '<p class="empty">No stops configured for this route.</p>';
-  } else {
-    for(const leg of legs){
-      const legDests = byDest[leg.to.location_id];
-      html += `<div style="padding:12px 16px">
-        <div class="leg-header">
-          <span>🚐</span>
-          <span>${leg.from.location?.name||'?'} → ${leg.to.location?.name||'?'}</span>
-          ${legDests?`<span class="badge bok">${Object.keys(legDests.items).length} items</span>`:'<span class="badge" style="background:var(--bg2);color:var(--text3)">No orders</span>'}
-        </div>`;
-      if(legDests){
-        html += `<div id="leg-items-${leg.to.location_id}">`;
-        for(const {item,totalQty,itemIds} of Object.values(legDests.items)){
-          html += renderConsolidatedItem(item, totalQty, itemIds, leg.to.location_id);
-        }
-        html += `</div>
-        <div class="btn-row" style="margin:8px 0 4px">
-          <button class="btn btnsm btnp" onclick="markLegAllPicked('${leg.to.location_id}','${routeId}','${date}')">Mark all picked</button>
+  for(let si=0; si<stopData.length; si++){
+    const {stop, destinations} = stopData[si];
+    const destCount = Object.keys(destinations).length;
+    const totalItems = Object.values(destinations).reduce((sum,d)=>sum+Object.keys(d.items).length,0);
+
+    html += `<div style="padding:14px 16px;border-top:0.5px solid var(--border)">
+      <div class="leg-header" style="font-size:13px">
+        📍 Stop ${si+1}: <strong>${stop.location?.name||'?'}</strong>
+        ${totalItems>0
+          ? `<span class="badge bok">${totalItems} item${totalItems!==1?'s':''} to load</span>`
+          : `<span class="badge" style="background:var(--bg2);color:var(--text3)">No pickups here</span>`}
+      </div>`;
+
+    if(destCount === 0){
+      html += `<p style="font-size:13px;color:var(--text3);padding:6px 0">Nothing to pick up at this stop.</p>`;
+    } else {
+      // Sort destinations by their stop order (earlier stops first)
+      const sortedDests = Object.entries(destinations).sort(([,a],[,b])=>{
+        const ai = stops.findIndex(s=>s.location_id===a.loc?.id);
+        const bi = stops.findIndex(s=>s.location_id===b.loc?.id);
+        return ai-bi;
+      });
+
+      for(const [destLocId, destData] of sortedDests){
+        const destName = destData.loc?.name||'Unknown';
+        const itemCount = Object.keys(destData.items).length;
+        const stopKey = `${si}-${destLocId}`;
+
+        html += `<div style="margin:10px 0 4px">
+          <div style="font-size:12px;font-weight:600;color:var(--info);padding:5px 0;display:flex;align-items:center;gap:6px">
+            🚚 Going to: ${destName}
+            <span class="badge binfo">${itemCount} item${itemCount!==1?'s':''}</span>
+          </div>
+          <div id="stop-items-${stopKey}">
+            ${renderLegItems(destData.items, stopKey)}
+          </div>
+          <div class="btn-row" style="margin:6px 0 2px">
+            <button class="btn btnsm btnp" onclick="markStopDestPicked('${stopKey}')">Mark all picked</button>
+          </div>
         </div>`;
       }
-      html += '</div>';
     }
+    html += `</div>`;
   }
-  html += '</div>';
+
+  html += `</div>`;
   wrap.innerHTML = html;
 }
 
-function renderLegItems(itemsMap, legLocId) {
+// Mark all items picked for a given stop+destination key
+async function markStopDestPicked(stopKey) {
+  const container = document.getElementById('stop-items-'+stopKey);
+  if(!container) return;
+  const checks = container.querySelectorAll('.check:not(.checked)');
+  for(const chk of checks){
+    chk.click();
+  }
+}
+
+function renderLegItems(itemsMap, stopKey) {
   // Group consolidated items by pick location
   const byPickLoc = {};
   for(const {item, totalQty, itemIds} of Object.values(itemsMap)) {
-    const pickLocName = item.product?.pick_location?.name || 'No pick location';
+    const pickLocName = item.product?.pick_location?.name || 'Unassigned';
     if(!byPickLoc[pickLocName]) byPickLoc[pickLocName] = [];
     byPickLoc[pickLocName].push({item, totalQty, itemIds});
   }
-  const sortedLocs = Object.keys(byPickLoc).sort((a,b) => a==='No pick location'?1:b==='No pick location'?-1:a.localeCompare(b));
+  const sortedLocs = Object.keys(byPickLoc).sort((a,b) =>
+    a==='Unassigned'?1 : b==='Unassigned'?-1 : a.localeCompare(b));
   return sortedLocs.map(locName =>
-    `<div class="pick-loc-header">📍 ${locName}</div>` +
-    byPickLoc[locName].map(({item,totalQty,itemIds}) => renderConsolidatedItem(item,totalQty,itemIds,legLocId)).join('')
+    `<div class="pick-loc-header">🗄 ${locName}</div>` +
+    byPickLoc[locName].map(({item,totalQty,itemIds}) =>
+      renderConsolidatedItem(item, totalQty, itemIds, stopKey)).join('')
   ).join('');
 }
 
-function renderConsolidatedItem(item, totalQty, itemIds, legLocId){
+function renderConsolidatedItem(item, totalQty, itemIds, stopKey){
   const idsAttr = itemIds.join(',');
-  return `<div class="manifest-item" id="citem-${legLocId}-${item.product_id}">
-    <div class="check" onclick="toggleConsolidatedPicked('${legLocId}','${item.product_id}','${idsAttr}',this)">${''}</div>
+  const safeKey = stopKey.replace(/[^a-zA-Z0-9-]/g,'_');
+  return `<div class="manifest-item" id="citem-${safeKey}-${item.product_id}">
+    <div class="check" onclick="toggleConsolidatedPicked('${safeKey}','${item.product_id}','${idsAttr}',this)"></div>
     <div style="flex:1">
       <div class="item-name">${item.product?.name||'?'}</div>
-      <div class="item-meta">${item.product?.unit||''}</div>
+      <div class="item-meta">${item.product?.unit||''}${item.rolled_over?' · <span class=\"badge bwarn\">Rolled over</span>':''}</div>
     </div>
     <div class="item-qty">${totalQty}</div>
-    <button class="btn btnsm btndanger" onclick="markConsolidatedOOS('${legLocId}','${item.product_id}','${idsAttr}')">OOS</button>
+    <button class="btn btnsm btndanger" onclick="markConsolidatedOOS('${safeKey}','${item.product_id}','${idsAttr}')">OOS</button>
   </div>`;
 }
 
-async function toggleConsolidatedPicked(legLocId, productId, idsStr, checkEl){
+async function toggleConsolidatedPicked(safeKey, productId, idsStr, checkEl){
   const ids = idsStr.split(',');
   const isPicked = checkEl.classList.contains('checked');
   const newPicked = !isPicked;
   await sb.from('order_items').update({picked:newPicked}).in('id',ids);
   checkEl.classList.toggle('checked', newPicked);
   checkEl.textContent = newPicked ? '✓' : '';
-  const row = document.getElementById(`citem-${legLocId}-${productId}`);
-  if(row){ row.classList.toggle('picked', newPicked); }
+  const row = document.getElementById(`citem-${safeKey}-${productId}`);
+  if(row) row.classList.toggle('picked', newPicked);
 }
 
-async function markConsolidatedOOS(legLocId, productId, idsStr){
-  if(!confirm('Mark out of stock? These items will be flagged and rolled to the next run.')) return;
+async function markConsolidatedOOS(safeKey, productId, idsStr){
+  if(!confirm('Mark out of stock? These items will be flagged.')) return;
   const ids = idsStr.split(',');
   await sb.from('order_items').update({oos:true,picked:false}).in('id',ids);
-  const row = document.getElementById(`citem-${legLocId}-${productId}`);
-  if(row){ row.classList.add('oos'); row.querySelector('.check').textContent=''; }
-}
-
-async function markLegAllPicked(legLocId, routeId, date){
-  // Get all order_item ids for this leg destination on this route+date
-  const { data: orders } = await sb.from('orders')
-    .select('id').eq('route_id',routeId).eq('scheduled_date',date).eq('ordering_location_id',legLocId);
-  if(!orders?.length) return;
-  const orderIds = orders.map(o=>o.id);
-  await sb.from('order_items').update({picked:true}).in('order_id',orderIds).eq('oos',false);
-  // Refresh the leg visually
-  document.querySelectorAll(`[id^="citem-${legLocId}-"]`).forEach(el=>{
-    el.classList.add('picked');
-    const chk = el.querySelector('.check');
-    if(chk){chk.classList.add('checked');chk.textContent='✓';}
-  });
+  const row = document.getElementById(`citem-${safeKey}-${productId}`);
+  if(row){ row.classList.add('oos'); const chk=row.querySelector('.check'); if(chk){chk.classList.remove('checked');chk.textContent='';} }
 }
 
 async function markRouteDispatched(routeId, date){
