@@ -34,6 +34,7 @@
 .leg-header{background:var(--info-bg);color:var(--info);font-size:12px;font-weight:600;padding:8px 12px;border-radius:var(--radius);margin:12px 0 6px;display:flex;align-items:center;gap:8px}
 .manifest-section{border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;overflow:hidden}
 .manifest-section-header{background:var(--bg2);padding:12px 16px;font-weight:600;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mark-all-btn{padding:8px 14px;font-size:13px;font-weight:600;border-radius:8px;border:none;background:var(--ok);color:white;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .order-dest-select{font-size:14px;padding:6px 10px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);min-width:160px}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
@@ -89,14 +90,25 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--info);outline-of
 .tbl tbody tr:hover td{background:var(--bg2)}
 .tbl-section td{font-size:11px;font-weight:600;color:var(--text2);background:var(--bg2);text-transform:uppercase;letter-spacing:.4px;padding:6px 10px}
 /* Manifest */
-.manifest-item{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:0.5px solid var(--border);transition:background .15s}
-.manifest-item.picked{background:var(--ok-bg);opacity:.7}
-.manifest-item.oos{background:var(--err-bg);opacity:.7}
-.manifest-item .check{width:22px;height:22px;border-radius:6px;border:2px solid var(--border2);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--bg)}
+.manifest-item{display:flex;align-items:center;gap:10px;padding:14px 12px;border-bottom:0.5px solid var(--border);transition:background .15s;-webkit-tap-highlight-color:transparent}
+.manifest-item.picked{background:var(--ok-bg)}
+.manifest-item.picked .item-name{text-decoration:line-through;opacity:.6}
+.manifest-item.oos{background:var(--err-bg)}
+.manifest-item .check{width:32px;height:32px;border-radius:8px;border:2px solid var(--border2);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg);font-weight:700;transition:all .1s}
 .manifest-item .check.checked{background:var(--ok);border-color:var(--ok);color:white}
-.manifest-item .item-name{flex:1;font-weight:500}
-.manifest-item .item-meta{font-size:12px;color:var(--text2)}
-.manifest-item .item-qty{font-size:16px;font-weight:600;min-width:50px;text-align:right}
+.manifest-item .item-name{flex:1;font-weight:600;font-size:15px;line-height:1.3}
+.manifest-item .item-meta{font-size:12px;color:var(--text2);margin-top:2px}
+.manifest-item .item-qty{font-size:20px;font-weight:700;min-width:44px;text-align:right;color:var(--text)}
+.manifest-item .oos-btn{padding:6px 10px;font-size:12px;border-radius:6px;cursor:pointer;border:0.5px solid var(--err);background:transparent;color:var(--err);flex-shrink:0;font-weight:500}
+.stop-block{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:12px;overflow:hidden}
+.stop-block-header{background:var(--bg2);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:0.5px solid var(--border)}
+.stop-block-header .stop-name{font-size:15px;font-weight:700;color:var(--text)}
+.stop-block-header .stop-num{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.dest-block{border-bottom:0.5px solid var(--border)}
+.dest-block:last-child{border-bottom:none}
+.dest-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--info-bg)}
+.dest-header .dest-name{font-size:13px;font-weight:600;color:var(--info)}
+.pick-loc-bar{padding:6px 14px;background:var(--purp-bg);font-size:11px;font-weight:700;color:var(--purp);text-transform:uppercase;letter-spacing:.5px;border-bottom:0.5px solid var(--border)}
 /* Order form */
 .order-item-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border)}
 .order-item-row:last-child{border-bottom:none}
@@ -123,8 +135,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--info);outline-of
 
 <!-- CONFIG — fill in after Supabase setup -->
 <script>
-const SUPABASE_URL = 'https://nfzdrqriiwtaahhzzecz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5memRycXJpaXd0YWFoaHp6ZWN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MzgxNzgsImV4cCI6MjA5NjExNDE3OH0.9p765PNXuPOv3iEOGaglHZQRp5YYXJIGyLYXZQNdyf0';
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 </script>
 
 <!-- AUTH SCREEN -->
@@ -230,6 +242,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     <div id="panel-admin" class="panel">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn active-admin-tab" onclick="showAdminTab('products',this)">Products</button>
+        <button class="btn" onclick="showAdminTab('bulk',this)">Bulk edit</button>
         <button class="btn" onclick="showAdminTab('catalog',this)">Categories &amp; units</button>
         <button class="btn" onclick="showAdminTab('routes',this)">Routes</button>
         <button class="btn" onclick="showAdminTab('users',this)">Users</button>
@@ -266,6 +279,64 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
             </select>
           </div>
           <div id="products-table"></div>
+        </div>
+      </div>
+      <div id="admin-bulk" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Bulk edit products</div>
+          <div class="hint">Select products using the checkboxes, then apply a change to all of them at once. Useful for updating routes, fulfillment centers, or categories across many items.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <input type="text" id="bulk-search" placeholder="Filter products…" style="flex:1;min-width:140px;font-size:13px" oninput="renderBulkTable()"/>
+            <select id="bulk-cat-filter" style="font-size:13px;min-width:140px" onchange="renderBulkTable()">
+              <option value="">All categories</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-bottom:0.5px solid var(--border);margin-bottom:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:600">
+              <input type="checkbox" id="bulk-select-all" onchange="toggleBulkSelectAll(this.checked)"/> Select all visible
+            </label>
+            <span id="bulk-selected-count" style="font-size:12px;color:var(--text2)">0 selected</span>
+          </div>
+          <div id="bulk-product-table" style="max-height:320px;overflow-y:auto;margin-bottom:14px"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Apply to selected products</div>
+          <div class="row3" style="margin-bottom:12px">
+            <div class="fg">
+              <label>Set category</label>
+              <select id="bulk-set-cat"><option value="">— no change —</option></select>
+            </div>
+            <div class="fg">
+              <label>Set pick location</label>
+              <select id="bulk-set-pick"><option value="">— no change —</option></select>
+            </div>
+            <div class="fg">
+              <label>Set active status</label>
+              <select id="bulk-set-active">
+                <option value="">— no change —</option>
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </div>
+          </div>
+          <div class="fg" style="margin-bottom:10px">
+            <label>Add fulfillment centers (check to add)</label>
+            <div id="bulk-add-fulfill" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
+          <div class="fg" style="margin-bottom:10px">
+            <label>Remove fulfillment centers (check to remove)</label>
+            <div id="bulk-remove-fulfill" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
+          <div class="fg" style="margin-bottom:10px">
+            <label>Add routes (check to add)</label>
+            <div id="bulk-add-routes" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
+          <div class="fg" style="margin-bottom:14px">
+            <label>Remove routes (check to remove)</label>
+            <div id="bulk-remove-routes" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
+          </div>
+          <div id="bulk-status"></div>
+          <button class="btn btnp" onclick="applyBulkEdit()">Apply to selected</button>
         </div>
       </div>
       <div id="admin-catalog" class="admin-sub-panel" style="display:none">
@@ -653,7 +724,26 @@ async function submitOrder() {
       if(error) throw error;
       await sb.from('order_items').insert(routeItems.map(i=>({...i,order_id:order.id})));
     }
-    setStatus('order-status','Order placed!','ok');
+    // Build confirmation message with latest expected delivery
+    const routeEntries = Object.values(byRoute);
+    let confirmMsg = 'Order placed!';
+    if(routeEntries.length === 1){
+      const {date} = routeEntries[0];
+      const route = allRoutes.find(r=>r.id===routeEntries[0].route_id);
+      const today = new Date().toISOString().split('T')[0];
+      const dateLabel = date===today ? 'today' : 'tomorrow';
+      confirmMsg = `Order placed! Expected by ${route?.name||'?'} ${dateLabel} (dispatch ${route?.dispatch_time||''}).`;
+    } else if(routeEntries.length > 1){
+      // Find latest date/route
+      const sorted = routeEntries.sort((a,b)=>a.date>b.date?1:a.date<b.date?-1:
+        (allRoutes.findIndex(r=>r.id===a.route_id))-(allRoutes.findIndex(r=>r.id===b.route_id)));
+      const last = sorted[sorted.length-1];
+      const route = allRoutes.find(r=>r.id===last.route_id);
+      const today = new Date().toISOString().split('T')[0];
+      const dateLabel = last.date===today ? 'today' : 'tomorrow';
+      confirmMsg = `Order placed! ${routeEntries.length} routes. Last item expected by ${route?.name||'?'} ${dateLabel}.`;
+    }
+    setStatus('order-status', confirmMsg, 'ok');
     clearOrderForm();
     loadOrderPanel();
   } catch(e){setStatus('order-status','Error: '+e.message,'err');}
@@ -664,22 +754,38 @@ async function loadMyOrders() {
   const el = document.getElementById('my-orders-list');
   el.innerHTML='<span class="spin"></span> Loading…';
   const { data, error } = await sb.from('orders')
-    .select('*,run:delivery_runs(run_label,from_loc:locations!from_location_id(name)),items:order_items(quantity,picked,oos,product:products(name,unit))')
+    .select('*,route:routes(name),dest:locations!ordering_location_id(name),items:order_items(quantity,picked,oos,product:products(name,unit))')
     .eq('placed_by', currentUser.id)
     .order('created_at',{ascending:false})
-    .limit(20);
-  if(error||!data?.length){el.innerHTML='<p class="empty">No orders yet.</p>';return;}
+    .limit(30);
+  if(error){el.innerHTML='<p class="empty">Error loading orders: '+error.message+'</p>';return;}
+  if(!data?.length){el.innerHTML='<p class="empty">No orders placed yet.</p>';return;}
 
   el.innerHTML = data.map(o=>{
     const statusBadge = {pending:'binfo',picking:'bwarn',dispatched:'bwarn',delivered:'bok',cancelled:'berr'}[o.status]||'binfo';
-    const items = (o.items||[]).map(i=>`<div style="font-size:12px;color:var(--text2);padding:2px 0">${i.quantity} × ${i.product?.name||'?'} ${i.picked?'✓':''} ${i.oos?'<span class="badge berr">OOS</span>':''}</div>`).join('');
-    return `<div class="run-card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
-        <h4>${o.run?.run_label||'Order'} — ${new Date(o.created_at).toLocaleDateString()}</h4>
-        <span class="badge ${statusBadge}">${o.status}</span>
+    const pickedCount = (o.items||[]).filter(i=>i.picked).length;
+    const totalCount = (o.items||[]).length;
+    const oosCount = (o.items||[]).filter(i=>i.oos).length;
+    const items = (o.items||[]).map(i=>
+      `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);padding:3px 0;border-bottom:0.5px solid var(--border)">
+        <span style="flex:1">${i.product?.name||'?'}</span>
+        <span>${i.quantity} ${i.product?.unit||''}</span>
+        ${i.picked?'<span class="badge bok">Picked</span>':''}
+        ${i.oos?'<span class="badge berr">OOS</span>':''}
+      </div>`).join('');
+    return `<div class="run-card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:600;font-size:14px">${o.route?.name||'?'} → ${o.dest?.name||'?'}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">${new Date(o.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} · placed ${new Date(o.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <span style="font-size:12px;color:var(--text2)">${pickedCount}/${totalCount} picked${oosCount?' · '+oosCount+' OOS':''}</span>
+          <span class="badge ${statusBadge}">${o.status}</span>
+        </div>
       </div>
-      ${items}
-      ${o.notes?`<p style="font-size:12px;color:var(--text2);margin-top:6px">Note: ${o.notes}</p>`:''}
+      <div>${items}</div>
+      ${o.notes?`<div style="font-size:12px;color:var(--text2);margin-top:6px;padding-top:6px;border-top:0.5px solid var(--border)">Note: ${o.notes}</div>`:''}
     </div>`;
   }).join('');
 }
@@ -814,50 +920,48 @@ async function loadManifest(routeId, date) {
   }
 
   const dateLabel = new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-  let html = `<div class="manifest-section">
-    <div class="manifest-section-header">
-      <span>${route.name} — ${dateLabel}</span>
-      <button class="btn btnsm btnp" onclick="markRouteDispatched('${routeId}','${date}')">Dispatch all →</button>
-    </div>`;
+  let html = `<div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div style="font-size:16px;font-weight:700">${route.name} &mdash; ${dateLabel}</div>
+    <button class="btn btnsm" onclick="markRouteDispatched('${routeId}','${date}')">Dispatch all</button>
+  </div>`;
 
+  let hasAnyItems = false;
   for(let si=0; si<stopData.length; si++){
     const {stop, destinations} = stopData[si];
     const destCount = Object.keys(destinations).length;
     const totalItems = Object.values(destinations).reduce((sum,d)=>sum+Object.keys(d.items).length,0);
+    if(totalItems > 0) hasAnyItems = true;
 
-    html += `<div style="padding:14px 16px;border-top:0.5px solid var(--border)">
-      <div class="leg-header" style="font-size:13px">
-        📍 Stop ${si+1}: <strong>${stop.location?.name||'?'}</strong>
+    html += `<div class="stop-block">
+      <div class="stop-block-header">
+        <div>
+          <div class="stop-num">Stop ${si+1}</div>
+          <div class="stop-name">${stop.location?.name||'?'}</div>
+        </div>
         ${totalItems>0
           ? `<span class="badge bok">${totalItems} item${totalItems!==1?'s':''} to load</span>`
-          : `<span class="badge" style="background:var(--bg2);color:var(--text3)">No pickups here</span>`}
+          : `<span class="badge" style="background:var(--bg2);color:var(--text3)">No pickups</span>`}
       </div>`;
 
     if(destCount === 0){
-      html += `<p style="font-size:13px;color:var(--text3);padding:6px 0">Nothing to pick up at this stop.</p>`;
+      html += `<div style="padding:12px 14px;font-size:13px;color:var(--text3)">Nothing to pick up at this stop.</div>`;
     } else {
-      // Sort destinations by their stop order (earlier stops first)
       const sortedDests = Object.entries(destinations).sort(([,a],[,b])=>{
         const ai = stops.findIndex(s=>s.location_id===a.loc?.id);
         const bi = stops.findIndex(s=>s.location_id===b.loc?.id);
         return ai-bi;
       });
-
       for(const [destLocId, destData] of sortedDests){
         const destName = destData.loc?.name||'Unknown';
         const itemCount = Object.keys(destData.items).length;
         const stopKey = `${si}-${destLocId}`;
-
-        html += `<div style="margin:10px 0 4px">
-          <div style="font-size:12px;font-weight:600;color:var(--info);padding:5px 0;display:flex;align-items:center;gap:6px">
-            🚚 Going to: ${destName}
-            <span class="badge binfo">${itemCount} item${itemCount!==1?'s':''}</span>
+        html += `<div class="dest-block">
+          <div class="dest-header">
+            <span class="dest-name">To: ${destName}</span>
+            <button class="mark-all-btn" onclick="markStopDestPicked('${stopKey}')">Mark all</button>
           </div>
           <div id="stop-items-${stopKey}">
             ${renderLegItems(destData.items, stopKey)}
-          </div>
-          <div class="btn-row" style="margin:6px 0 2px">
-            <button class="btn btnsm btnp" onclick="markStopDestPicked('${stopKey}')">Mark all picked</button>
           </div>
         </div>`;
       }
@@ -865,7 +969,9 @@ async function loadManifest(routeId, date) {
     html += `</div>`;
   }
 
-  html += `</div>`;
+  if(!hasAnyItems){
+    html += `<p class="empty">No items to pick up on this route today.</p>`;
+  }
   wrap.innerHTML = html;
 }
 
@@ -880,7 +986,6 @@ async function markStopDestPicked(stopKey) {
 }
 
 function renderLegItems(itemsMap, stopKey) {
-  // Group consolidated items by pick location
   const byPickLoc = {};
   for(const {item, totalQty, itemIds} of Object.values(itemsMap)) {
     const pickLocName = item.product?.pick_location?.name || 'Unassigned';
@@ -890,7 +995,7 @@ function renderLegItems(itemsMap, stopKey) {
   const sortedLocs = Object.keys(byPickLoc).sort((a,b) =>
     a==='Unassigned'?1 : b==='Unassigned'?-1 : a.localeCompare(b));
   return sortedLocs.map(locName =>
-    `<div class="pick-loc-header">🗄 ${locName}</div>` +
+    `<div class="pick-loc-bar">${locName}</div>` +
     byPickLoc[locName].map(({item,totalQty,itemIds}) =>
       renderConsolidatedItem(item, totalQty, itemIds, stopKey)).join('')
   ).join('');
@@ -899,14 +1004,15 @@ function renderLegItems(itemsMap, stopKey) {
 function renderConsolidatedItem(item, totalQty, itemIds, stopKey){
   const idsAttr = itemIds.join(',');
   const safeKey = stopKey.replace(/[^a-zA-Z0-9-]/g,'_');
+  const isRolled = itemIds.some(id => false); // updated live
   return `<div class="manifest-item" id="citem-${safeKey}-${item.product_id}">
     <div class="check" onclick="toggleConsolidatedPicked('${safeKey}','${item.product_id}','${idsAttr}',this)"></div>
-    <div style="flex:1">
+    <div style="flex:1;min-width:0">
       <div class="item-name">${item.product?.name||'?'}</div>
-      <div class="item-meta">${item.product?.unit||''}${item.rolled_over?' · <span class=\"badge bwarn\">Rolled over</span>':''}</div>
+      <div class="item-meta">${item.product?.unit||''}</div>
     </div>
     <div class="item-qty">${totalQty}</div>
-    <button class="btn btnsm btndanger" onclick="markConsolidatedOOS('${safeKey}','${item.product_id}','${idsAttr}')">OOS</button>
+    <button class="oos-btn" onclick="markConsolidatedOOS('${safeKey}','${item.product_id}','${idsAttr}')">OOS</button>
   </div>`;
 }
 
@@ -958,6 +1064,7 @@ function showAdminTab(name, el) {
   if(el){el.classList.add('active-admin-tab');}
   if(name==='routes') loadRoutesAdmin();
   if(name==='products') { renderProdFormCheckboxes(); loadProductsTable(); }
+  if(name==='bulk') loadBulkEditPanel();
 }
 
 async function loadAdminPanel() {
@@ -1444,6 +1551,122 @@ function setStatus(id,msg,type){
   const el=document.getElementById(id);
   if(!el)return;
   el.innerHTML=msg?`<div class="status s${type}">${msg}</div>`:'';
+}
+
+// ── BULK EDIT ─────────────────────────────────────────────
+let bulkSelected = new Set();
+
+function loadBulkEditPanel() {
+  populateCategorySelect('bulk-cat-filter', true);
+  populateCategorySelect('bulk-set-cat', true);
+  populatePickLocSelect('bulk-set-pick');
+  // Add/remove fulfillment checkboxes
+  const fulfillLocs = allLocations.filter(l=>l.can_fulfill);
+  const checkboxHtml = fulfillLocs.map(l=>
+    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px">
+      <input type="checkbox" value="${l.id}"/> ${l.name}
+    </label>`).join('');
+  document.getElementById('bulk-add-fulfill').innerHTML = checkboxHtml;
+  document.getElementById('bulk-remove-fulfill').innerHTML = checkboxHtml.replace(/type="checkbox"/g,'type="checkbox" data-remove="1"');
+  const routeHtml = allRoutes.map(r=>
+    `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px">
+      <input type="checkbox" value="${r.id}"/> ${r.name}
+    </label>`).join('');
+  document.getElementById('bulk-add-routes').innerHTML = routeHtml;
+  document.getElementById('bulk-remove-routes').innerHTML = routeHtml.replace(/type="checkbox"/g,'type="checkbox" data-remove="1"');
+  bulkSelected.clear();
+  renderBulkTable();
+}
+
+function renderBulkTable() {
+  const query = (document.getElementById('bulk-search')?.value||'').toLowerCase().trim();
+  const catFilter = document.getElementById('bulk-cat-filter')?.value||'';
+  const filtered = allProducts.filter(p=>{
+    const matchName = !query || p.name.toLowerCase().includes(query);
+    const matchCat = !catFilter || p.category_id===catFilter;
+    return matchName && matchCat;
+  });
+  const el = document.getElementById('bulk-product-table');
+  if(!filtered.length){el.innerHTML='<p class="empty">No products match.</p>';return;}
+  el.innerHTML = '<table class="tbl" style="font-size:13px"><thead><tr><th style="width:36px"></th><th>Product</th><th>Category</th><th>Fulfillment</th><th>Routes</th></tr></thead><tbody>' +
+    filtered.map(p=>{
+      const locs=(p.fulfillment||[]).map(f=>{const l=allLocations.find(x=>x.id===f.location_id);return l?`<span class="chip">${l.short_code}</span>`:''}).join('');
+      const routes=(p.product_routes||[]).map(r=>{const rt=allRoutes.find(x=>x.id===r.route_id);return rt?`<span class="chip">${rt.name}</span>`:''}).join('');
+      return `<tr>
+        <td><input type="checkbox" ${bulkSelected.has(p.id)?'checked':''} onchange="toggleBulkSelect('${p.id}',this.checked)"/></td>
+        <td>${p.name}</td>
+        <td style="color:var(--text2)">${p.category?.name||'—'}</td>
+        <td>${locs||'—'}</td>
+        <td>${routes||'—'}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+  document.getElementById('bulk-selected-count').textContent = bulkSelected.size+' selected';
+}
+
+function toggleBulkSelect(id, checked) {
+  checked ? bulkSelected.add(id) : bulkSelected.delete(id);
+  document.getElementById('bulk-selected-count').textContent = bulkSelected.size+' selected';
+}
+
+function toggleBulkSelectAll(checked) {
+  const checkboxes = document.querySelectorAll('#bulk-product-table input[type=checkbox]');
+  checkboxes.forEach(cb=>{
+    cb.checked=checked;
+    const row = cb.closest('tr');
+    // get product id from onchange attr
+    const onch = cb.getAttribute('onchange')||'';
+    const match = onch.match(/'([a-f0-9-]{36})'/);
+    if(match) checked ? bulkSelected.add(match[1]) : bulkSelected.delete(match[1]);
+  });
+  document.getElementById('bulk-selected-count').textContent = bulkSelected.size+' selected';
+}
+
+async function applyBulkEdit() {
+  if(!bulkSelected.size){setStatus('bulk-status','Select at least one product.','err');return;}
+  const ids = [...bulkSelected];
+  const setCat = document.getElementById('bulk-set-cat').value;
+  const setPick = document.getElementById('bulk-set-pick').value;
+  const setActive = document.getElementById('bulk-set-active').value;
+  const addFulfill = [...document.querySelectorAll('#bulk-add-fulfill input:checked')].map(c=>c.value);
+  const removeFulfill = [...document.querySelectorAll('#bulk-remove-fulfill input:checked')].map(c=>c.value);
+  const addRoutes = [...document.querySelectorAll('#bulk-add-routes input:checked')].map(c=>c.value);
+  const removeRoutes = [...document.querySelectorAll('#bulk-remove-routes input:checked')].map(c=>c.value);
+
+  const hasChanges = setCat||setPick||setActive!==''||addFulfill.length||removeFulfill.length||addRoutes.length||removeRoutes.length;
+  if(!hasChanges){setStatus('bulk-status','Select at least one change to apply.','err');return;}
+
+  setStatus('bulk-status','<span class="spin"></span> Applying…','info');
+  try {
+    // Product field updates
+    if(setCat||setPick||setActive!==''){
+      const update = {};
+      if(setCat) update.category_id = setCat;
+      if(setPick) update.pick_location_id = setPick;
+      if(setActive!=='') update.active = setActive==='true';
+      await sb.from('products').update(update).in('id',ids);
+    }
+    // Fulfillment: remove then add
+    if(removeFulfill.length) await sb.from('product_fulfillment').delete().in('product_id',ids).in('location_id',removeFulfill);
+    if(addFulfill.length){
+      const rows = ids.flatMap(pid=>addFulfill.map(lid=>({product_id:pid,location_id:lid})));
+      await sb.from('product_fulfillment').upsert(rows,{onConflict:'product_id,location_id'});
+    }
+    // Routes: remove then add
+    if(removeRoutes.length) await sb.from('product_routes').delete().in('product_id',ids).in('route_id',removeRoutes);
+    if(addRoutes.length){
+      const rows = ids.flatMap(pid=>addRoutes.map(rid=>({product_id:pid,route_id:rid})));
+      await sb.from('product_routes').upsert(rows,{onConflict:'product_id,route_id'});
+    }
+    setStatus('bulk-status',`Done! Updated ${ids.length} product${ids.length!==1?'s':''}.`,'ok');
+    // Reset checkboxes
+    document.querySelectorAll('#bulk-add-fulfill input, #bulk-remove-fulfill input, #bulk-add-routes input, #bulk-remove-routes input').forEach(c=>c.checked=false);
+    document.getElementById('bulk-set-cat').value='';
+    document.getElementById('bulk-set-pick').value='';
+    document.getElementById('bulk-set-active').value='';
+    await loadGlobalData();
+    renderBulkTable();
+    loadProductsTable();
+  } catch(e){setStatus('bulk-status','Error: '+e.message,'err');}
 }
 
 // ── BOOT ──────────────────────────────────────────────────
