@@ -205,6 +205,25 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
           <div id="order-items-list"></div>
         </div>
         <div class="card">
+          <div class="card-title">Request a custom item
+            <span class="badge bwarn">Not in catalog</span>
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Can't find what you need? Request it here. It will be added to the next manifest and flagged for the admin to add to the catalog.</div>
+          <div class="row2" style="margin-bottom:12px">
+            <div class="fg"><label>Item name / description</label><input type="text" id="custom-item-name" placeholder="e.g. Extra sourdough loaves"/></div>
+            <div class="fg"><label>Quantity</label><input type="number" id="custom-item-qty" min="1" value="1" placeholder="1"/></div>
+          </div>
+          <div class="row2" style="margin-bottom:12px">
+            <div class="fg"><label>Fulfillment location <span style="font-weight:400;color:var(--text2)">(who should prepare it)</span></label>
+              <select id="custom-item-fulfill-loc"></select>
+            </div>
+            <div class="fg"><label>Unit</label><input type="text" id="custom-item-unit" placeholder="e.g. each, bag, dozen"/></div>
+          </div>
+          <div class="fg" style="margin-bottom:12px"><label>Notes (optional)</label><input type="text" id="custom-item-notes" placeholder="Any extra details…"/></div>
+          <div id="custom-item-status"></div>
+          <button class="btn" onclick="submitCustomRequest()">Submit custom request</button>
+        </div>
+        <div class="card">
           <div id="order-status"></div>
           <div class="btn-row">
             <button class="btn btnp" onclick="submitOrder()">Submit order</button>
@@ -247,6 +266,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
         <button class="btn" onclick="showAdminTab('routes',this)">Routes</button>
         <button class="btn" onclick="showAdminTab('users',this)">Users</button>
         <button class="btn" onclick="showAdminTab('allorders',this)">All orders</button>
+        <button class="btn" onclick="showAdminTab('orderlog',this)">Order log</button>
+        <button class="btn" onclick="showAdminTab('customrequests',this)">Custom requests</button>
         <button class="btn" onclick="showAdminTab('ooslog',this)">OOS log</button>
       </div>
       <div id="admin-products" class="admin-sub-panel">
@@ -423,6 +444,39 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
           <div id="all-orders-list"></div>
         </div>
       </div>
+      <div id="admin-orderlog" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Order activity log</div>
+          <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:12px">A record of all order actions — who placed, fulfilled, dispatched, or cancelled orders.</div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <select id="order-log-filter" onchange="loadOrderLog()" style="font-size:13px;min-width:160px">
+              <option value="">All actions</option>
+              <option value="placed">Placed</option>
+              <option value="picked">Item picked</option>
+              <option value="dispatched">Dispatched</option>
+              <option value="oos">OOS marked</option>
+            </select>
+            <input type="text" id="order-log-search" placeholder="Search user or item…" style="flex:1;min-width:140px;font-size:13px" oninput="loadOrderLog()"/>
+          </div>
+          <div id="order-log-table"></div>
+        </div>
+      </div>
+      <div id="admin-customrequests" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Custom item requests
+            <span class="badge bwarn" id="custom-req-open-count"></span>
+          </div>
+          <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:12px">Items requested by staff that aren't in the catalog yet. Review and add to catalog, or dismiss.</div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <select id="custom-req-filter" onchange="loadCustomRequests()" style="font-size:13px;min-width:160px">
+              <option value="open">Pending review</option>
+              <option value="all">All requests</option>
+              <option value="added">Added to catalog</option>
+            </select>
+          </div>
+          <div id="custom-requests-table"></div>
+        </div>
+      </div>
       <div id="admin-ooslog" class="admin-sub-panel" style="display:none">
         <div class="card">
           <div class="card-title">OOS log
@@ -575,12 +629,17 @@ function showPanel(name, el) {
 // Returns the next available route for a given destination location
 // "available" = route has a stop at that dest, product is on that route, cutoff not yet passed
 // If today's cutoff passed, returns tomorrow's same route
+function localDateStr(d) {
+  // Returns YYYY-MM-DD in the user's local timezone (not UTC)
+  return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0');
+}
+
 function findNextRoute(destLocId, productId) {
   const now = new Date();
   const nowTime = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
-  const today = now.toISOString().split('T')[0];
+  const today = localDateStr(now);
   const tomorrow = new Date(now); tomorrow.setDate(now.getDate()+1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+  const tomorrowStr = localDateStr(tomorrow);
 
   for(const route of allRoutes) {
     // Does this route have a stop at destLocId?
@@ -600,14 +659,16 @@ function findNextRoute(destLocId, productId) {
 
 function loadOrderPanel() {
   const myLocId = currentProfile?.location_id;
-  const orderingLocs = allLocations.filter(l=>l.can_order && l.id!==myLocId);
   const destEl = document.getElementById('order-dest');
-  // Admins can order for any store; staff order for their own location by default
-  const dests = currentProfile?.role==='admin' ? allLocations.filter(l=>l.can_order) : orderingLocs;
+  // All users can order for any location that allows ordering
+  const dests = allLocations.filter(l=>l.can_order);
   destEl.innerHTML = '<option value="">— select store —</option>' +
     dests.map(l=>`<option value="${l.id}">${l.name}</option>`).join('');
-  // If staff, pre-select their own store
-  if(currentProfile?.role==='staff' && myLocId) {
+  // Populate custom item fulfillment location dropdown
+  const cfEl = document.getElementById('custom-item-fulfill-loc');
+  if(cfEl) cfEl.innerHTML = allLocations.filter(l=>l.can_fulfill).map(l=>`<option value="${l.id}">${l.name}</option>`).join('');
+  // Pre-select home location for convenience if they have one and it can order
+  if(myLocId && dests.find(l=>l.id===myLocId)) {
     destEl.value = myLocId;
     loadOrderItems();
   }
@@ -752,6 +813,8 @@ async function submitOrder() {
       }).select().single();
       if(error) throw error;
       await sb.from('order_items').insert(routeItems.map(i=>({...i,order_id:order.id})));
+      // Log this order placement
+      await logOrderActivity('placed', {order_id: order.id, location_id: destLocId, route_id, notes: `${routeItems.length} item(s) for ${allLocations.find(l=>l.id===destLocId)?.name||'?'}`});
     }
     // Build confirmation message with latest expected delivery
     const routeEntries = Object.values(byRoute);
@@ -759,7 +822,7 @@ async function submitOrder() {
     if(routeEntries.length === 1){
       const {date} = routeEntries[0];
       const route = allRoutes.find(r=>r.id===routeEntries[0].route_id);
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateStr(new Date());
       const dateLabel = date===today ? 'today' : 'tomorrow';
       confirmMsg = `Order placed! Expected by ${route?.name||'?'} ${dateLabel} (dispatch ${route?.dispatch_time||''}).`;
     } else if(routeEntries.length > 1){
@@ -768,7 +831,7 @@ async function submitOrder() {
         (allRoutes.findIndex(r=>r.id===a.route_id))-(allRoutes.findIndex(r=>r.id===b.route_id)));
       const last = sorted[sorted.length-1];
       const route = allRoutes.find(r=>r.id===last.route_id);
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateStr(new Date());
       const dateLabel = last.date===today ? 'today' : 'tomorrow';
       confirmMsg = `Order placed! ${routeEntries.length} routes. Last item expected by ${route?.name||'?'} ${dateLabel}.`;
     }
@@ -843,7 +906,7 @@ function renderManifestDateAndRoutes() {
   target.setHours(0,0,0,0);
   const diffDays = Math.round((target - today) / 86400000);
 
-  const dateStr = target.toISOString().split('T')[0];
+  const dateStr = localDateStr(target);
   const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : diffDays === -1 ? 'Yesterday'
     : target.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
   document.getElementById('manifest-date-label').textContent = dayLabel;
@@ -1060,10 +1123,10 @@ async function toggleConsolidatedPicked(safeKey, productId, idsStr, checkEl){
   const row = document.getElementById(`citem-${safeKey}-${productId}`);
   if(row){
     row.classList.toggle('picked', newPicked);
-    row.classList.remove('oos'); // picking it clears OOS visual
+    row.classList.remove('oos');
   }
-  // If picking a previously-OOS item, resolve the OOS log
-  if(newPicked){
+  if(newPicked) {
+    await logOrderActivity('picked', {product_id: productId, notes: `Qty picked on manifest`});
     const wasOOS = (window._oosLogOpen||[]).some(e=>e.product_id===productId);
     if(wasOOS) await resolveOOSOnPick(productId);
   }
@@ -1187,6 +1250,7 @@ async function markRouteDispatched(routeId, date){
     }
   }
   await sb.from('orders').update({status:'dispatched'}).in('id',orders.map(o=>o.id));
+  await logOrderActivity('dispatched', {route_id: routeId, notes: `Route dispatched, ${rolledCount} item(s) rolled`});
   alert(`Route dispatched!${rolledCount?' '+rolledCount+' item(s) rolled to next run.':''}`);
   activeManifestRouteId = null;
   document.getElementById('manifest-wrap').innerHTML='';
@@ -1203,6 +1267,8 @@ function showAdminTab(name, el) {
   if(name==='products') { renderProdFormCheckboxes(); loadProductsTable(); }
   if(name==='bulk') loadBulkEditPanel();
   if(name==='ooslog') loadOOSLog();
+  if(name==='orderlog') loadOrderLog();
+  if(name==='customrequests') loadCustomRequests();
 }
 
 async function loadAdminPanel() {
@@ -1664,11 +1730,11 @@ async function loadUsersTable() {
 
 async function loadAllOrders() {
   const { data } = await sb.from('orders')
-    .select('*,ordering_loc:locations!ordering_location_id(name),run:delivery_runs(run_label),items:order_items(id,picked,oos)')
+    .select('*,ordering_loc:locations!ordering_location_id(name),route:routes(name),placed:profiles!placed_by(full_name),items:order_items(id,picked,oos)')
     .order('created_at',{ascending:false}).limit(50);
   const el = document.getElementById('all-orders-list');
   if(!data?.length){el.innerHTML='<p class="empty">No orders yet.</p>';return;}
-  el.innerHTML='<table class="tbl"><thead><tr><th>Date</th><th>Store</th><th>Run</th><th>Items</th><th>Status</th></tr></thead><tbody>'+
+  el.innerHTML='<table class="tbl"><thead><tr><th>Date</th><th>Store</th><th>Route</th><th>Placed by</th><th>Items</th><th>Status</th></tr></thead><tbody>'+
     data.map(o=>{
       const picked=(o.items||[]).filter(i=>i.picked).length;
       const total=(o.items||[]).length;
@@ -1676,7 +1742,8 @@ async function loadAllOrders() {
       return`<tr>
         <td>${new Date(o.created_at).toLocaleDateString()}</td>
         <td>${o.ordering_loc?.name||'?'}</td>
-        <td>${o.run?.run_label||'?'}</td>
+        <td>${o.route?.name||'?'}</td>
+        <td style="font-size:12px">${o.placed?.full_name||'?'}</td>
         <td>${picked}/${total} picked</td>
         <td><span class="badge ${badge}">${o.status}</span></td>
       </tr>`;
@@ -1899,6 +1966,192 @@ async function adminClearProductOOS(productId){
   await sb.from('products').update({oos:false,oos_since:null}).eq('id',productId);
   await loadGlobalData();
   loadOOSLog();
+}
+
+// ── ORDER LOG ─────────────────────────────────────────────
+async function logOrderActivity(action, data) {
+  // action: 'placed' | 'picked' | 'oos' | 'dispatched' | 'cancelled'
+  try {
+    await sb.from('order_log').insert({
+      action,
+      order_id: data.order_id||null,
+      order_item_id: data.order_item_id||null,
+      product_id: data.product_id||null,
+      location_id: data.location_id||null,
+      route_id: data.route_id||null,
+      performed_by: currentUser.id,
+      notes: data.notes||null
+    });
+  } catch(e) { /* non-critical, don't block */ }
+}
+
+async function loadOrderLog() {
+  const el = document.getElementById('order-log-table');
+  if(!el) return;
+  el.innerHTML = '<span class="spin"></span> Loading…';
+  const filter = document.getElementById('order-log-filter')?.value||'';
+  const search = (document.getElementById('order-log-search')?.value||'').toLowerCase().trim();
+
+  let q = sb.from('order_log')
+    .select('*,performer:profiles!performed_by(full_name),order:orders(ordering_location_id,route_id,ordering_loc:locations!ordering_location_id(name)),product:products(name),route:routes(name)')
+    .order('created_at',{ascending:false}).limit(200);
+  if(filter) q = q.eq('action', filter);
+  const { data, error } = await q;
+  if(error||!data?.length){el.innerHTML='<p class="empty">No log entries found.</p>';return;}
+
+  let rows = data;
+  if(search) rows = rows.filter(e=>(e.performer?.full_name||'').toLowerCase().includes(search)||(e.product?.name||'').toLowerCase().includes(search));
+
+  el.innerHTML = '<table class="tbl"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Item / Order</th><th>Location</th></tr></thead><tbody>' +
+    rows.map(e=>{
+      const when = new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      const actionBadge = {placed:'binfo',picked:'bok',oos:'berr',dispatched:'bwarn',cancelled:'berr'}[e.action]||'binfo';
+      const dest = e.order?.ordering_loc?.name||'';
+      const product = e.product?.name||'';
+      const detail = [product, dest].filter(Boolean).join(' → ');
+      return `<tr>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap">${when}</td>
+        <td><strong>${e.performer?.full_name||'?'}</strong></td>
+        <td><span class="badge ${actionBadge}">${e.action}</span></td>
+        <td style="font-size:13px">${detail||e.notes||'—'}</td>
+        <td style="font-size:12px;color:var(--text2)">${e.route?.name||''}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ── CUSTOM ITEM REQUESTS ──────────────────────────────────
+async function submitCustomRequest() {
+  const destLocId = document.getElementById('order-dest').value;
+  if(!destLocId){setStatus('custom-item-status','Select a destination store first.','err');return;}
+  const name = document.getElementById('custom-item-name').value.trim();
+  if(!name){setStatus('custom-item-status','Enter an item name.','err');return;}
+  const qty = parseFloat(document.getElementById('custom-item-qty').value)||1;
+  const unit = document.getElementById('custom-item-unit').value.trim()||'each';
+  const fulfillLocId = document.getElementById('custom-item-fulfill-loc').value;
+  const notes = document.getElementById('custom-item-notes').value.trim();
+
+  setStatus('custom-item-status','<span class="spin"></span> Submitting…','info');
+  try {
+    // Find next route that visits destLocId
+    const nr = findNextRouteForDest(destLocId);
+    if(!nr){setStatus('custom-item-status','No route found for this destination.','err');return;}
+
+    // Create the custom request record
+    const { data: req, error } = await sb.from('custom_requests').insert({
+      item_name: name,
+      quantity: qty,
+      unit,
+      fulfill_location_id: fulfillLocId||null,
+      dest_location_id: destLocId,
+      route_id: nr.route.id,
+      scheduled_date: nr.date,
+      requested_by: currentUser.id,
+      notes: notes||null,
+      status: 'pending'
+    }).select().single();
+    if(error) throw error;
+
+    // Also create an order for this destination/route/date and add a placeholder order_item
+    let { data: existingOrder } = await sb.from('orders')
+      .select('id').eq('ordering_location_id', destLocId)
+      .eq('route_id', nr.route.id).eq('scheduled_date', nr.date)
+      .in('status',['pending','picking']).maybeSingle();
+    if(!existingOrder){
+      const { data: newOrder } = await sb.from('orders').insert({
+        ordering_location_id: destLocId,
+        placed_by: currentUser.id,
+        route_id: nr.route.id,
+        scheduled_date: nr.date,
+        notes: 'Contains custom request(s)',
+        status: 'pending'
+      }).select().single();
+      existingOrder = newOrder;
+    }
+    if(existingOrder){
+      await sb.from('order_items').insert({
+        order_id: existingOrder.id,
+        product_id: null,
+        quantity: qty,
+        notes: `CUSTOM REQUEST: ${name} (${unit})${notes?' — '+notes:''}`,
+        custom_request_id: req.id
+      });
+      // Log the activity
+      await logOrderActivity('placed', {order_id: existingOrder.id, location_id: destLocId, route_id: nr.route.id, notes: `Custom: ${name}`});
+    }
+
+    const destName = allLocations.find(l=>l.id===destLocId)?.name||'store';
+    setStatus('custom-item-status', `Custom request submitted! It will appear on the ${nr.route.name} manifest for ${destName}${nr.cutoffPassed?' tomorrow':' today'}.`, 'ok');
+    document.getElementById('custom-item-name').value='';
+    document.getElementById('custom-item-qty').value='1';
+    document.getElementById('custom-item-unit').value='';
+    document.getElementById('custom-item-notes').value='';
+  } catch(e){setStatus('custom-item-status','Error: '+e.message,'err');}
+}
+
+// Like findNextRoute but without requiring a productId — just finds next route to a dest
+function findNextRouteForDest(destLocId) {
+  const now = new Date();
+  const nowTime = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+  const today = localDateStr(now);
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate()+1);
+  const tomorrowStr = localDateStr(tomorrow);
+  for(const route of allRoutes) {
+    const hasStop = allRouteStops.some(s=>s.route_id===route.id && s.location_id===destLocId);
+    if(!hasStop) continue;
+    const cutoffPassed = route.cutoff_time <= nowTime;
+    return { route, date: cutoffPassed ? tomorrowStr : today, cutoffPassed };
+  }
+  return null;
+}
+
+async function loadCustomRequests() {
+  const el = document.getElementById('custom-requests-table');
+  if(!el) return;
+  el.innerHTML = '<span class="spin"></span> Loading…';
+  const filter = document.getElementById('custom-req-filter')?.value||'open';
+
+  let q = sb.from('custom_requests')
+    .select('*,requester:profiles!requested_by(full_name),dest:locations!dest_location_id(name),fulfill_loc:locations!fulfill_location_id(name),route:routes(name)')
+    .order('created_at',{ascending:false}).limit(200);
+  if(filter==='open') q = q.eq('status','pending');
+  else if(filter==='added') q = q.eq('status','added');
+
+  const { data, error } = await q;
+  const countEl = document.getElementById('custom-req-open-count');
+  if(error){el.innerHTML='<p class="empty">Error loading requests.</p>';return;}
+  if(!data?.length){el.innerHTML='<p class="empty">No custom requests found.</p>';if(countEl)countEl.textContent='';return;}
+
+  const openCount = data.filter(r=>r.status==='pending').length;
+  if(countEl) countEl.textContent = openCount > 0 ? openCount+' pending' : '';
+
+  el.innerHTML = '<table class="tbl"><thead><tr><th>Requested</th><th>Item</th><th>Qty</th><th>For</th><th>Fulfill at</th><th>Route</th><th>Requested by</th><th>Status</th><th></th></tr></thead><tbody>' +
+    data.map(r=>{
+      const when = new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      const statusBadge = {pending:'bwarn',added:'bok',dismissed:'berr'}[r.status]||'bwarn';
+      return `<tr>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap">${when}</td>
+        <td><strong>${r.item_name}</strong>${r.notes?`<div style="font-size:11px;color:var(--text2)">${r.notes}</div>`:''}</td>
+        <td>${r.quantity} ${r.unit}</td>
+        <td>${r.dest?.name||'?'}</td>
+        <td>${r.fulfill_loc?.name||'?'}</td>
+        <td>${r.route?.name||'?'}</td>
+        <td>${r.requester?.full_name||'?'}</td>
+        <td><span class="badge ${statusBadge}">${r.status}</span></td>
+        <td style="white-space:nowrap;display:flex;gap:4px">
+          ${r.status==='pending'?`
+            <button class="btn btnsm bok" onclick="resolveCustomRequest('${r.id}','added')" title="Mark as added to catalog">Added ✓</button>
+            <button class="btn btnsm btndanger" onclick="resolveCustomRequest('${r.id}','dismissed')">Dismiss</button>
+          `:''}
+        </td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+async function resolveCustomRequest(id, status) {
+  const label = status==='added' ? 'Mark as added to catalog?' : 'Dismiss this request?';
+  if(!confirm(label)) return;
+  await sb.from('custom_requests').update({status, resolved_at: new Date().toISOString(), resolved_by: currentUser.id}).eq('id',id);
+  loadCustomRequests();
 }
 
 // ── BOOT ──────────────────────────────────────────────────
