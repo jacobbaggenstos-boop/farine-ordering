@@ -169,6 +169,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <span id="header-user" style="font-size:12px;color:var(--text2)"></span>
+      <button class="btn btnsm" onclick="openChangeOwnPassword()">Change PW</button>
       <button class="btn btnsm" onclick="signOut()">Sign out</button>
     </div>
   </header>
@@ -532,6 +533,11 @@ async function init() {
 async function loadProfile() {
   const { data } = await sb.from('profiles').select('*,location:locations(*)').eq('id', currentUser.id).single();
   currentProfile = data;
+  // If no profile row exists yet (e.g. newly created user), show a helpful message
+  if(!currentProfile) {
+    document.getElementById('loading-screen').innerHTML =
+      '<div style="padding:32px;text-align:center;color:#fff">Your account was created but your profile isn\'t set up yet.<br>Please ask an admin to assign your role and location in the Users tab.</div>';
+  }
 }
 
 async function loadGlobalData() {
@@ -595,6 +601,32 @@ async function signIn() {
   showApp();
 }
 
+function openChangeOwnPassword() {
+  const html = `<div class="modal-overlay" id="own-pw-modal" onclick="if(event.target===this)this.remove()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Change your password</div>
+      <label>New password</label>
+      <input type="password" id="own-pw-new" placeholder="Min 6 characters" style="margin-bottom:16px"/>
+      <div id="own-pw-status"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn" onclick="document.getElementById('own-pw-modal').remove()">Cancel</button>
+        <button class="btn btnp" onclick="doChangeOwnPassword()">Update password</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function doChangeOwnPassword() {
+  const pass = document.getElementById('own-pw-new').value;
+  if(pass.length < 6){setStatus('own-pw-status','Password must be at least 6 characters.','err');return;}
+  setStatus('own-pw-status','<span class="spin"></span> Updating…','info');
+  const { error } = await sb.auth.updateUser({ password: pass });
+  if(error){setStatus('own-pw-status','Error: '+error.message,'err');return;}
+  document.getElementById('own-pw-modal').remove();
+  alert('Password updated successfully.');
+}
+
 async function signOut() {
   await sb.auth.signOut();
   currentUser=null; currentProfile=null;
@@ -606,10 +638,11 @@ function buildNav() {
   const role = currentProfile?.role;
   const nav = document.getElementById('main-nav');
   const tabs = [];
-  if(role==='staff'||role==='admin') tabs.push(['order','Place Order']);
+  // Show Place Order for staff and admin; also show for anyone whose profile loaded but role is unexpected
+  if(role !== 'driver') tabs.push(['order','Place Order']);
   tabs.push(['myorders','My Orders']);
-  if(role==='driver'||role==='admin') tabs.push(['manifest','Manifest']);
-  if(role==='admin') tabs.push(['admin','Admin']);
+  if(role === 'driver' || role === 'admin') tabs.push(['manifest','Manifest']);
+  if(role === 'admin') tabs.push(['admin','Admin']);
   nav.innerHTML = tabs.map(([id,label])=>`<button class="nav-btn" onclick="showPanel('${id}',this)">${label}</button>`).join('');
 }
 
@@ -1762,17 +1795,121 @@ async function inviteUser() {
 }
 
 async function loadUsersTable() {
-  const { data } = await sb.from('profiles').select('*,location:locations(name)').order('full_name');
+  const { data, error } = await sb.from('profiles').select('*,location:locations(name)').order('full_name');
   const el = document.getElementById('users-table');
+  if(error){el.innerHTML=`<p class="empty">Error loading users: ${error.message}</p>`;return;}
   if(!data?.length){el.innerHTML='<p class="empty">No users yet.</p>';return;}
-  el.innerHTML='<table class="tbl"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Status</th></tr></thead><tbody>'+
-    data.map(u=>`<tr>
-      <td><strong>${u.full_name}</strong></td>
+  el.innerHTML='<table class="tbl"><thead><tr><th>Name</th><th>Role</th><th>Location</th><th>Status</th><th></th></tr></thead><tbody>'+
+    data.map(u=>`<tr id="urow-${u.id}">
+      <td><strong>${u.full_name}</strong><div style="font-size:11px;color:var(--text2)">${u.id===currentUser.id?'(you)':''}</div></td>
       <td><span class="badge ${u.role==='admin'?'bpurp':u.role==='driver'?'binfo':'bok'}">${u.role}</span></td>
       <td>${u.location?.name||'—'}</td>
       <td><span class="badge ${u.active?'bok':'berr'}">${u.active?'Active':'Inactive'}</span></td>
+      <td style="white-space:nowrap;display:flex;gap:4px;justify-content:flex-end">
+        <button class="btn btnsm" onclick="openEditUser('${u.id}','${u.full_name.replace(/'/g,"\\'")}','${u.role}','${u.location_id||''}','${u.active}')">Edit</button>
+        <button class="btn btnsm bwarn" onclick="openResetPassword('${u.id}','${u.full_name.replace(/'/g,"\\'")}')">Reset PW</button>
+        ${u.id!==currentUser.id?`<button class="btn btnsm btndanger" onclick="deleteUser('${u.id}','${u.full_name.replace(/'/g,"\\'")}')">Delete</button>`:''}
+      </td>
     </tr>`).join('')+
     '</tbody></table>';
+}
+
+function openEditUser(id, name, role, locationId, active) {
+  const locOptions = allLocations.map(l=>`<option value="${l.id}" ${l.id===locationId?'selected':''}>${l.name}</option>`).join('');
+  const html = `<div class="modal-overlay" id="edit-user-modal" onclick="if(event.target===this)this.remove()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Edit user — ${name}</div>
+      <label>Full name</label>
+      <input type="text" id="eu-name" value="${name}" style="margin-bottom:10px"/>
+      <label>Role</label>
+      <select id="eu-role" style="margin-bottom:10px">
+        <option value="staff" ${role==='staff'?'selected':''}>Staff</option>
+        <option value="driver" ${role==='driver'?'selected':''}>Driver</option>
+        <option value="admin" ${role==='admin'?'selected':''}>Admin</option>
+      </select>
+      <label>Home location</label>
+      <select id="eu-loc" style="margin-bottom:10px"><option value="">— none —</option>${locOptions}</select>
+      <label>Status</label>
+      <select id="eu-active" style="margin-bottom:16px">
+        <option value="true" ${active==='true'?'selected':''}>Active</option>
+        <option value="false" ${active!=='true'?'selected':''}>Inactive</option>
+      </select>
+      <div id="eu-status"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn" onclick="document.getElementById('edit-user-modal').remove()">Cancel</button>
+        <button class="btn btnp" onclick="saveEditUser('${id}')">Save changes</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function saveEditUser(id) {
+  const name = document.getElementById('eu-name').value.trim();
+  const role = document.getElementById('eu-role').value;
+  const locationId = document.getElementById('eu-loc').value;
+  const active = document.getElementById('eu-active').value === 'true';
+  if(!name){setStatus('eu-status','Name is required.','err');return;}
+  setStatus('eu-status','<span class="spin"></span> Saving…','info');
+  const { error } = await sb.from('profiles').update({
+    full_name: name, role, location_id: locationId||null, active
+  }).eq('id', id);
+  if(error){setStatus('eu-status','Error: '+error.message,'err');return;}
+  document.getElementById('edit-user-modal').remove();
+  loadUsersTable();
+}
+
+function openResetPassword(userId, name) {
+  const html = `<div class="modal-overlay" id="reset-pw-modal" onclick="if(event.target===this)this.remove()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Reset password — ${name}</div>
+      <label>New password</label>
+      <input type="password" id="rp-pass" placeholder="Min 6 characters" style="margin-bottom:16px"/>
+      <div id="rp-status"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn" onclick="document.getElementById('reset-pw-modal').remove()">Cancel</button>
+        <button class="btn btnp" onclick="doResetPassword('${userId}')">Set password</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function doResetPassword(userId) {
+  const pass = document.getElementById('rp-pass').value;
+  if(pass.length < 6){setStatus('rp-status','Password must be at least 6 characters.','err');return;}
+  setStatus('rp-status','<span class="spin"></span> Updating…','info');
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/reset-password`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
+      body: JSON.stringify({ user_id: userId, password: pass })
+    });
+    const result = await res.json();
+    if(!res.ok) throw new Error(result.error||'Unknown error');
+    document.getElementById('reset-pw-modal').remove();
+    alert('Password updated successfully.');
+  } catch(e) {
+    setStatus('rp-status','Error: '+e.message,'err');
+  }
+}
+
+async function deleteUser(userId, name) {
+  if(!confirm(`Delete ${name}? This cannot be undone and will remove their profile and login.`)) return;
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-user`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
+      body: JSON.stringify({ user_id: userId })
+    });
+    const result = await res.json();
+    if(!res.ok) throw new Error(result.error||'Unknown error');
+    document.getElementById(`urow-${userId}`)?.remove();
+  } catch(e) {
+    alert('Error deleting user: '+e.message);
+  }
 }
 
 async function loadAllOrders() {
