@@ -972,14 +972,33 @@ async function loadManifest(routeId, date) {
     return;
   }
 
+  // Fetch custom request details for any custom items in these orders
+  const allItemIds = orders.flatMap(o=>(o.items||[]).map(i=>i.id));
+  let customReqMap = {};
+  if(allItemIds.length) {
+    const { data: crItems } = await sb.from('order_items')
+      .select('id,custom_request_id,custom_requests(item_name,quantity,unit,notes,fulfill_location_id,fulfill_loc:locations!fulfill_location_id(name))')
+      .in('id', allItemIds)
+      .not('custom_request_id','is',null);
+    for(const ci of crItems||[]) customReqMap[ci.id] = ci.custom_requests;
+  }
+
   // For each order item, determine which stop it should be PICKED UP FROM.
-  // Rule: the fulfillment location for that product that appears earliest in the route stops.
-  // If no fulfillment location is on the route, use the first stop as fallback.
+  // Custom items: use their fulfill_location_id; fallback to stop 0.
+  // Catalog items: use product fulfillment locations.
   function pickupStopIndex(item) {
+    const cr = customReqMap[item.id];
+    if(cr) {
+      if(cr.fulfill_location_id) {
+        const idx = stops.findIndex(s=>s.location_id===cr.fulfill_location_id);
+        return idx >= 0 ? idx : 0;
+      }
+      return 0;
+    }
     const fulfillLocIds = (item.product?.fulfillment||[])
       .filter(f=>f.in_stock)
       .map(f=>f.location_id);
-    let earliest = stops.length; // fallback: after all stops
+    let earliest = stops.length;
     for(let i=0;i<stops.length;i++){
       if(fulfillLocIds.includes(stops[i].location_id)){
         earliest = i; break;
@@ -989,7 +1008,7 @@ async function loadManifest(routeId, date) {
   }
 
   // Build per-stop data:
-  // stopData[stopIndex] = { stop, destinations: { destLocId: { loc, items: { prodId: {item,totalQty,itemIds} } } } }
+  // stopData[stopIndex] = { stop, destinations: { destLocId: { loc, items: { key: {item,totalQty,itemIds,customReq} } } } }
   const stopData = stops.map(s=>({stop:s, destinations:{}}));
 
   for(const order of orders){
@@ -998,15 +1017,16 @@ async function loadManifest(routeId, date) {
     for(const item of (order.items||[])){
       if(item.oos) continue;
       const si = pickupStopIndex(item);
-      if(si >= stops.length) continue; // no fulfillment location on this route
+      if(si >= stops.length) continue;
       const sd = stopData[si];
       if(!sd.destinations[destLocId])
         sd.destinations[destLocId] = {loc:destLoc, items:{}, orderIds:new Set()};
       const dest = sd.destinations[destLocId];
-      const pid = item.product_id;
-      if(!dest.items[pid]) dest.items[pid]={item,totalQty:0,itemIds:[]};
-      dest.items[pid].totalQty += Number(item.quantity);
-      dest.items[pid].itemIds.push(item.id);
+      const cr = customReqMap[item.id];
+      const itemKey = cr ? ('custom_'+item.id) : item.product_id;
+      if(!dest.items[itemKey]) dest.items[itemKey]={item,totalQty:0,itemIds:[],customReq:cr||null};
+      dest.items[itemKey].totalQty += Number(item.quantity);
+      dest.items[itemKey].itemIds.push(item.id);
       dest.orderIds.add(order.id);
     }
   }
@@ -1079,24 +1099,43 @@ async function markStopDestPicked(stopKey) {
 
 function renderLegItems(itemsMap, stopKey) {
   const byPickLoc = {};
-  for(const {item, totalQty, itemIds} of Object.values(itemsMap)) {
-    const pickLocName = item.product?.pick_location?.name || 'Unassigned';
+  for(const entry of Object.values(itemsMap)) {
+    const {item, customReq} = entry;
+    const pickLocName = customReq
+      ? (customReq.fulfill_loc?.name ? '★ Custom Requests' : '★ Custom Requests')
+      : (item.product?.pick_location?.name || 'Unassigned');
     if(!byPickLoc[pickLocName]) byPickLoc[pickLocName] = [];
-    byPickLoc[pickLocName].push({item, totalQty, itemIds});
+    byPickLoc[pickLocName].push(entry);
   }
   const sortedLocs = Object.keys(byPickLoc).sort((a,b) =>
     a==='Unassigned'?1 : b==='Unassigned'?-1 : a.localeCompare(b));
   return sortedLocs.map(locName =>
     `<div class="pick-loc-bar">${locName}</div>` +
-    byPickLoc[locName].map(({item,totalQty,itemIds}) =>
-      renderConsolidatedItem(item, totalQty, itemIds, stopKey)).join('')
+    byPickLoc[locName].map(entry =>
+      renderConsolidatedItem(entry.item, entry.totalQty, entry.itemIds, stopKey, entry.customReq||null)).join('')
   ).join('');
 }
 
-function renderConsolidatedItem(item, totalQty, itemIds, stopKey){
+function renderConsolidatedItem(item, totalQty, itemIds, stopKey, customReq){
   const idsAttr = itemIds.join(',');
   const safeKey = stopKey.replace(/[^a-zA-Z0-9-]/g,'_');
-  // Check if this product has an open OOS log entry (rolled over from a previous run)
+  // Custom request item — render as a special note card
+  if(customReq) {
+    const itemUniqueKey = 'custom_'+item.id;
+    const fulfillNote = customReq.fulfill_loc?.name ? ` • Pick at: ${customReq.fulfill_loc.name}` : '';
+    const extraNote = customReq.notes ? ` • ${customReq.notes}` : '';
+    return `<div class="manifest-item" id="citem-${safeKey}-${itemUniqueKey}" style="background:var(--warn-bg);border-left:3px solid var(--warn)">
+      <div class="check" onclick="toggleConsolidatedPicked('${safeKey}','${itemUniqueKey}','${idsAttr}',this)"></div>
+      <div style="flex:1;min-width:0">
+        <div class="item-name" style="color:var(--warn)">★ ${customReq.item_name}
+          <span class="badge bwarn" style="margin-left:6px;font-size:10px">Custom request</span>
+        </div>
+        <div class="item-meta">${customReq.unit}${fulfillNote}${extraNote}</div>
+      </div>
+      <div class="item-qty" style="color:var(--warn)">${totalQty}</div>
+    </div>`;
+  }
+  // Standard catalog item
   const isRolledOOS = item.rolled_over && (window._oosLogOpen||[]).some(e=>e.product_id===item.product_id);
   const oosStyle = isRolledOOS
     ? 'background:var(--warn-bg);border-color:var(--warn);color:var(--warn)'
