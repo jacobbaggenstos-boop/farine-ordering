@@ -270,6 +270,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
         <button class="btn" onclick="showAdminTab('orderlog',this)">Order log</button>
         <button class="btn" onclick="showAdminTab('customrequests',this)">Custom requests</button>
         <button class="btn" onclick="showAdminTab('ooslog',this)">OOS log</button>
+        <button class="btn" onclick="showAdminTab('reports',this)">Reports</button>
       </div>
       <div id="admin-products" class="admin-sub-panel">
         <div class="card">
@@ -500,6 +501,57 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
           <div class="card-title">Currently OOS products</div>
           <div class="hint">Products with an active OOS flag — shown with a warning on the ordering page. Clear manually if restocked.</div>
           <div id="oos-products-list"></div>
+        </div>
+      </div>
+      <div id="admin-reports" class="admin-sub-panel" style="display:none">
+        <div class="card">
+          <div class="card-title">Transfer report
+            <span class="badge binfo" style="font-size:11px">Cost allocation</span>
+          </div>
+          <div class="hint" style="font-size:12px;color:var(--text2);margin-bottom:16px">
+            Summary of all products transferred between locations in a date range. Grouped by product for easy cost allocation tracking.
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+            <div>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Period</label>
+              <select id="report-period" onchange="onReportPeriodChange()" style="font-size:13px;min-width:140px">
+                <option value="this_week">This week</option>
+                <option value="last_week">Last week</option>
+                <option value="this_month" selected>This month</option>
+                <option value="last_month">Last month</option>
+                <option value="custom">Custom range</option>
+              </select>
+            </div>
+            <div id="report-custom-dates" style="display:none;display:flex;gap:8px;align-items:flex-end">
+              <div>
+                <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">From</label>
+                <input type="date" id="report-date-from" style="font-size:13px"/>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">To</label>
+                <input type="date" id="report-date-to" style="font-size:13px"/>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Group by</label>
+              <select id="report-groupby" style="font-size:13px">
+                <option value="product">Product</option>
+                <option value="category">Category</option>
+                <option value="destination">Destination store</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Status</label>
+              <select id="report-status" style="font-size:13px">
+                <option value="delivered">Delivered only</option>
+                <option value="all">All (inc. pending)</option>
+              </select>
+            </div>
+            <button class="btn btnp" onclick="loadReportsTab()">Generate</button>
+            <button class="btn" onclick="exportReportCSV()">Export CSV</button>
+          </div>
+          <div id="report-summary" style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap"></div>
+          <div id="report-table"></div>
         </div>
       </div>
     </div>
@@ -1407,6 +1459,10 @@ function showAdminTab(name, el) {
   if(name==='ooslog') loadOOSLog();
   if(name==='orderlog') loadOrderLog();
   if(name==='customrequests') loadCustomRequests();
+  if(name==='users') loadUsersTable();
+  if(name==='allorders') loadAllOrders();
+  if(name==='catalog') loadCatalogSettings();
+  if(name==='reports') loadReportsTab();
 }
 
 async function loadAdminPanel() {
@@ -2402,6 +2458,178 @@ async function resolveCustomRequest(id, status) {
   if(!confirm(label)) return;
   await sb.from('custom_requests').update({status, resolved_at: new Date().toISOString(), resolved_by: currentUser.id}).eq('id',id);
   loadCustomRequests();
+}
+
+// ── REPORTS ───────────────────────────────────────────────
+function onReportPeriodChange() {
+  const val = document.getElementById('report-period').value;
+  const customEl = document.getElementById('report-custom-dates');
+  customEl.style.display = val === 'custom' ? 'flex' : 'none';
+}
+
+function getReportDateRange() {
+  const period = document.getElementById('report-period').value;
+  const now = new Date();
+  let from, to;
+  if(period === 'custom') {
+    from = document.getElementById('report-date-from').value;
+    to = document.getElementById('report-date-to').value;
+    return { from, to };
+  }
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDay();
+  if(period === 'this_week') {
+    const start = new Date(now); start.setDate(now.getDate() - (d===0?6:d-1));
+    from = localDateStr(start); to = localDateStr(now);
+  } else if(period === 'last_week') {
+    const end = new Date(now); end.setDate(now.getDate() - (d===0?6:d-1) - 1);
+    const start = new Date(end); start.setDate(end.getDate() - 6);
+    from = localDateStr(start); to = localDateStr(end);
+  } else if(period === 'this_month') {
+    from = `${y}-${String(m+1).padStart(2,'0')}-01`;
+    to = localDateStr(now);
+  } else if(period === 'last_month') {
+    const lm = m === 0 ? 11 : m-1;
+    const ly = m === 0 ? y-1 : y;
+    const lastDay = new Date(y, m, 0).getDate();
+    from = `${ly}-${String(lm+1).padStart(2,'0')}-01`;
+    to = `${ly}-${String(lm+1).padStart(2,'0')}-${lastDay}`;
+  }
+  return { from, to };
+}
+
+let _reportData = []; // cache for CSV export
+
+async function loadReportsTab() {
+  const el = document.getElementById('report-table');
+  const summaryEl = document.getElementById('report-summary');
+  if(!el) return;
+  el.innerHTML = '<span class="spin"></span> Loading…';
+  summaryEl.innerHTML = '';
+
+  const { from, to } = getReportDateRange();
+  if(!from || !to) { el.innerHTML='<p class="empty">Select a date range.</p>'; return; }
+
+  const statusFilter = document.getElementById('report-status').value;
+  const groupBy = document.getElementById('report-groupby').value;
+
+  // Fetch orders in range with all items
+  let q = sb.from('orders')
+    .select(`
+      id, scheduled_date, status,
+      dest:locations!ordering_location_id(name),
+      items:order_items(
+        id, quantity, picked, oos, rolled_over,
+        product:products(id, name, unit, category:categories(name))
+      )
+    `)
+    .gte('scheduled_date', from)
+    .lte('scheduled_date', to)
+    .not('status', 'eq', 'cancelled');
+
+  if(statusFilter === 'delivered') q = q.in('status', ['delivered','dispatched']);
+
+  const { data: orders, error } = await q;
+  if(error) { el.innerHTML=`<p class="empty">Error: ${error.message}</p>`; return; }
+  if(!orders?.length) { el.innerHTML='<p class="empty">No orders found for this period.</p>'; return; }
+
+  // Flatten all picked items (exclude OOS, include picked or pending depending on filter)
+  const rows = [];
+  for(const order of orders) {
+    for(const item of (order.items||[])) {
+      if(item.oos) continue;
+      if(item.rolled_over) continue; // don't double-count rollovers
+      if(!item.product) continue;
+      rows.push({
+        date: order.scheduled_date,
+        dest: order.dest?.name || '?',
+        product: item.product.name,
+        product_id: item.product.id,
+        unit: item.product.unit,
+        category: item.product.category?.name || 'Uncategorized',
+        qty: Number(item.quantity),
+        picked: item.picked,
+        status: order.status
+      });
+    }
+  }
+  _reportData = rows;
+
+  if(!rows.length) { el.innerHTML='<p class="empty">No items to report for this period.</p>'; return; }
+
+  // Group the data
+  const groups = {};
+  for(const row of rows) {
+    const key = groupBy==='product' ? row.product
+      : groupBy==='category' ? row.category
+      : row.dest;
+    if(!groups[key]) groups[key] = { label: key, items: {}, totalQty: 0, destinations: new Set() };
+    const g = groups[key];
+    const subKey = groupBy==='product' ? row.dest
+      : groupBy==='category' ? row.product
+      : row.product;
+    if(!g.items[subKey]) g.items[subKey] = { label: subKey, qty: 0, unit: row.unit };
+    g.items[subKey].qty += row.qty;
+    g.totalQty += row.qty;
+    g.destinations.add(row.dest);
+  }
+
+  const sortedGroups = Object.values(groups).sort((a,b)=>b.totalQty-a.totalQty);
+  const totalItems = rows.reduce((s,r)=>s+r.qty, 0);
+  const uniqueProducts = new Set(rows.map(r=>r.product)).size;
+  const uniqueDests = new Set(rows.map(r=>r.dest)).size;
+
+  summaryEl.innerHTML = [
+    ['Total units transferred', totalItems],
+    ['Unique products', uniqueProducts],
+    ['Stores receiving', uniqueDests],
+    ['Date range', `${from} → ${to}`]
+  ].map(([label,val])=>`
+    <div style="background:var(--surface2);border-radius:8px;padding:12px 16px;min-width:140px">
+      <div style="font-size:20px;font-weight:700;color:var(--accent)">${val}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px">${label}</div>
+    </div>`).join('');
+
+  const subLabel = groupBy==='product' ? 'Destination'
+    : groupBy==='category' ? 'Product'
+    : 'Product';
+
+  el.innerHTML = sortedGroups.map(g => {
+    const subRows = Object.values(g.items).sort((a,b)=>b.qty-a.qty);
+    return `
+      <div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          <strong style="font-size:15px">${g.label}</strong>
+          <span class="badge binfo" style="font-size:11px">${g.totalQty} total units</span>
+          ${groupBy!=='destination'?`<span style="font-size:12px;color:var(--text2)">${g.destinations.size} store${g.destinations.size!==1?'s':''}</span>`:''}
+        </div>
+        <table class="tbl" style="margin:0">
+          <thead><tr><th>${subLabel}</th><th style="text-align:right">Qty</th><th>Unit</th></tr></thead>
+          <tbody>
+            ${subRows.map(r=>`<tr>
+              <td>${r.label}</td>
+              <td style="text-align:right;font-weight:600">${r.qty}</td>
+              <td style="color:var(--text2);font-size:12px">${r.unit}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }).join('');
+}
+
+function exportReportCSV() {
+  if(!_reportData.length) { alert('Generate a report first.'); return; }
+  const headers = ['Date','Product','Category','Destination','Qty','Unit','Picked','Order Status'];
+  const rows = _reportData.map(r=>[
+    r.date, `"${r.product}"`, `"${r.category}"`, `"${r.dest}"`,
+    r.qty, r.unit, r.picked?'Yes':'No', r.status
+  ]);
+  const csv = [headers, ...rows].map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const { from, to } = getReportDateRange();
+  a.href = url; a.download = `farine-transfer-report-${from}-to-${to}.csv`;
+  a.click(); URL.revokeObjectURL(url);
 }
 
 // ── BOOT ──────────────────────────────────────────────────
