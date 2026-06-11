@@ -532,12 +532,17 @@ async function init() {
 
 async function loadProfile() {
   const { data } = await sb.from('profiles').select('*,location:locations(*)').eq('id', currentUser.id).single();
-  currentProfile = data;
-  // If no profile row exists yet (e.g. newly created user), show a helpful message
-  if(!currentProfile) {
-    document.getElementById('loading-screen').innerHTML =
-      '<div style="padding:32px;text-align:center;color:#fff">Your account was created but your profile isn\'t set up yet.<br>Please ask an admin to assign your role and location in the Users tab.</div>';
-  }
+  if(data) { currentProfile = data; return; }
+  // No profile row yet — create a minimal one so FK references don't fail
+  // Role defaults to 'staff'; admin can update it in the Users tab
+  const name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+  const { data: created } = await sb.from('profiles').upsert({
+    id: currentUser.id,
+    full_name: name,
+    role: 'staff',
+    active: true
+  }).select('*,location:locations(*)').single();
+  currentProfile = created;
 }
 
 async function loadGlobalData() {
@@ -1173,7 +1178,7 @@ function renderConsolidatedItem(item, totalQty, itemIds, stopKey, customReq){
   const oosStyle = isRolledOOS
     ? 'background:var(--warn-bg);border-color:var(--warn);color:var(--warn)'
     : '';
-  const oosLabel = isRolledOOS ? 'Still OOS?' : 'OOS';
+  const oosLabel = isRolledOOS ? 'Still short?' : 'Short';
   return `<div class="manifest-item${isRolledOOS?' oos':''}" id="citem-${safeKey}-${item.product_id}">
     <div class="check" onclick="toggleConsolidatedPicked('${safeKey}','${item.product_id}','${idsAttr}',this)"></div>
     <div style="flex:1;min-width:0">
@@ -1181,7 +1186,7 @@ function renderConsolidatedItem(item, totalQty, itemIds, stopKey, customReq){
       <div class="item-meta">${item.product?.unit||''}</div>
     </div>
     <div class="item-qty">${totalQty}</div>
-    <button class="oos-btn" style="${oosStyle}" onclick="markConsolidatedOOS('${safeKey}','${item.product_id}','${idsAttr}',${isRolledOOS})">${oosLabel}</button>
+    <button class="oos-btn" style="${oosStyle}" onclick="openShortModal('${safeKey}','${item.product_id}','${idsAttr}',${totalQty},${isRolledOOS})">${oosLabel}</button>
   </div>`;
 }
 
@@ -1204,24 +1209,73 @@ async function toggleConsolidatedPicked(safeKey, productId, idsStr, checkEl){
   }
 }
 
-async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false){
-  const confirmMsg = isStillOOS
-    ? 'Still out of stock? Items will roll to the next run again.'
-    : 'Mark out of stock? Items will be flagged and auto-rolled to the next run.';
-  if(!confirm(confirmMsg)) return;
+function openShortModal(safeKey, productId, idsStr, totalQty, isStillOOS=false) {
+  const existing = document.getElementById('short-modal');
+  if(existing) existing.remove();
+  const title = isStillOOS ? 'Still short?' : 'Mark as short';
+  const html = `<div class="modal-overlay" id="short-modal" onclick="if(event.target===this)this.remove()">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width:340px">
+      <div class="modal-title">${title}</div>
+      <p style="font-size:13px;color:var(--text2);margin:0 0 16px">How many were available?</p>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px">
+        <label style="font-size:13px;white-space:nowrap">Picked:</label>
+        <input type="number" id="short-picked-qty" min="0" max="${totalQty}" value="0"
+          style="width:80px;font-size:20px;text-align:center;padding:8px"/>
+        <span style="font-size:13px;color:var(--text2)">of ${totalQty} ordered</span>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 16px">
+        Remaining quantity will be flagged and rolled to the next run.
+        ${totalQty > 1 ? 'Enter 0 if completely out of stock.' : ''}
+      </p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" onclick="document.getElementById('short-modal').remove()">Cancel</button>
+        <button class="btn btndanger" onclick="markConsolidatedOOS('${safeKey}','${productId}','${idsStr}',${isStillOOS})">
+          Completely OOS (0 picked)
+        </button>
+        <button class="btn btnp" onclick="markPartialShort('${safeKey}','${productId}','${idsStr}',${totalQty},${isStillOOS})">
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('short-picked-qty').focus();
+}
 
+async function markPartialShort(safeKey, productId, idsStr, totalQty, isStillOOS) {
+  const pickedQty = parseInt(document.getElementById('short-picked-qty').value) || 0;
+  if(pickedQty >= totalQty) {
+    // They picked everything — just close, treat as fully picked
+    document.getElementById('short-modal').remove();
+    return;
+  }
+  document.getElementById('short-modal').remove();
+  const shortQty = totalQty - pickedQty;
+  await markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS, pickedQty, shortQty);
+}
+
+async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false, pickedQty=0, shortQty=null){
+  // shortQty=null means fully OOS (called directly from "Completely OOS" button)
   const ids = idsStr.split(',');
+  const rollQty = shortQty !== null ? shortQty : null; // null = use original quantities
 
-  // 1. Mark items OOS in current orders
-  await sb.from('order_items').update({oos:true, picked:false}).in('id', ids);
+  // 1. Mark items OOS in current orders (reduce quantity to picked amount if partial)
+  if(pickedQty > 0) {
+    // Partial: mark as picked for the picked portion, create new item for the short portion
+    await sb.from('order_items').update({picked: true, quantity: pickedQty}).in('id', ids);
+  } else {
+    await sb.from('order_items').update({oos: true, picked: false}).in('id', ids);
+  }
 
   // 2. Fetch full item details for rollover
   const { data: items } = await sb.from('order_items')
     .select('*,order:orders(ordering_location_id,route_id,scheduled_date)')
     .in('id', ids);
 
-  // 3. Flag product-level OOS
-  await sb.from('products').update({oos:true, oos_since:new Date().toISOString()}).eq('id', productId);
+  // 3. Flag product-level OOS (only if fully OOS)
+  if(pickedQty === 0) {
+    await sb.from('products').update({oos:true, oos_since:new Date().toISOString()}).eq('id', productId);
+  }
 
   // 4. Log to OOS log
   if(items?.length){
@@ -1230,12 +1284,13 @@ async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false)
       order_item_id: item.id,
       route_id: item.order?.route_id||null,
       location_id: item.order?.ordering_location_id||null,
+      notes: pickedQty > 0 ? `Partial: ${pickedQty} of ${totalQty||item.quantity} picked, ${rollQty||item.quantity-pickedQty} rolled` : null,
       logged_at: new Date().toISOString()
     }));
     await sb.from('oos_log').insert(logEntries);
   }
 
-  // 5. Auto-roll: create new order items on the next available run
+  // 5. Auto-roll the short/missing quantity to the next run
   if(items?.length){
     const byOrder = {};
     for(const item of items){
@@ -1246,7 +1301,6 @@ async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false)
     for(const {item, destLocId, items:orderItems} of Object.values(byOrder)){
       const nr = findNextRoute(destLocId, productId);
       if(!nr) continue;
-      // Find or create an order for this route+date+destination
       let { data: existingOrder } = await sb.from('orders')
         .select('id').eq('ordering_location_id', destLocId)
         .eq('route_id', nr.route.id).eq('scheduled_date', nr.date)
@@ -1257,17 +1311,18 @@ async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false)
           placed_by: currentUser.id,
           route_id: nr.route.id,
           scheduled_date: nr.date,
-          notes: 'Auto-rolled from OOS',
+          notes: pickedQty > 0 ? `Auto-rolled partial short (${rollQty} remaining)` : 'Auto-rolled from OOS',
           status: 'pending'
         }).select().single();
         existingOrder = newOrder;
       }
       if(existingOrder){
-        const totalQty = orderItems.reduce((sum,i)=>sum+Number(i.quantity),0);
+        const totalOrigQty = orderItems.reduce((sum,i)=>sum+Number(i.quantity),0);
+        const qtyToRoll = rollQty !== null ? rollQty : totalOrigQty;
         await sb.from('order_items').insert({
           order_id: existingOrder.id,
           product_id: productId,
-          quantity: totalQty,
+          quantity: qtyToRoll,
           rolled_from: orderItems[0].id,
           rolled_over: true
         });
@@ -1278,22 +1333,33 @@ async function markConsolidatedOOS(safeKey, productId, idsStr, isStillOOS=false)
   // 6. Update UI
   const row = document.getElementById(`citem-${safeKey}-${productId}`);
   if(row){
-    row.classList.add('oos');
-    const chk = row.querySelector('.check');
-    if(chk){chk.classList.remove('checked');chk.textContent='';}
-    // Change OOS button to "Still OOS?" for next time
-    const oosBtn = row.querySelector('.oos-btn');
-    if(oosBtn){
-      oosBtn.textContent='Still OOS?';
-      oosBtn.style.background='var(--warn-bg)';
-      oosBtn.style.borderColor='var(--warn)';
-      oosBtn.style.color='var(--warn)';
+    if(pickedQty > 0) {
+      // Partial pick — show as picked but with a note
+      row.classList.add('picked');
+      const chk = row.querySelector('.check');
+      if(chk){chk.classList.add('checked');chk.textContent='✓';}
+      const oosBtn = row.querySelector('.oos-btn');
+      if(oosBtn) oosBtn.style.display='none';
+      const meta = row.querySelector('.item-meta');
+      if(meta) meta.insertAdjacentHTML('beforeend',
+        `<span class="badge bwarn" style="margin-left:4px;font-size:10px">${pickedQty} of ${pickedQty+rollQty} — ${rollQty} rolled</span>`);
+    } else {
+      row.classList.add('oos');
+      const chk = row.querySelector('.check');
+      if(chk){chk.classList.remove('checked');chk.textContent='';}
+      const oosBtn = row.querySelector('.oos-btn');
+      if(oosBtn){
+        oosBtn.textContent='Still short?';
+        oosBtn.style.background='var(--warn-bg)';
+        oosBtn.style.borderColor='var(--warn)';
+        oosBtn.style.color='var(--warn)';
+      }
     }
   }
 
-  // Reload global data so order form reflects OOS status
   await loadGlobalData();
 }
+
 
 // Called when a previously-OOS item gets picked up — resolves OOS log
 async function resolveOOSOnPick(productId){
