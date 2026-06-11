@@ -522,7 +522,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
                 <option value="custom">Custom range</option>
               </select>
             </div>
-            <div id="report-custom-dates" style="display:none;display:flex;gap:8px;align-items:flex-end">
+            <div id="report-custom-dates" style="display:none;gap:8px;align-items:flex-end">
               <div>
                 <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">From</label>
                 <input type="date" id="report-date-from" style="font-size:13px"/>
@@ -533,11 +533,13 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
               </div>
             </div>
             <div>
-              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Group by</label>
-              <select id="report-groupby" style="font-size:13px">
-                <option value="product">Product</option>
-                <option value="category">Category</option>
-                <option value="destination">Destination store</option>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">View</label>
+              <select id="report-view" style="font-size:13px;min-width:180px">
+                <option value="billing">Billing — source → destination</option>
+                <option value="destination">By destination store</option>
+                <option value="source">By source location</option>
+                <option value="product">By product</option>
+                <option value="category">By category</option>
               </select>
             </div>
             <div>
@@ -2510,16 +2512,21 @@ async function loadReportsTab() {
   if(!from || !to) { el.innerHTML='<p class="empty">Select a date range.</p>'; return; }
 
   const statusFilter = document.getElementById('report-status').value;
-  const groupBy = document.getElementById('report-groupby').value;
+  const view = document.getElementById('report-view').value;
 
-  // Fetch orders in range with all items
+  // Fetch orders with items, product fulfillment (source location), and destination
   let q = sb.from('orders')
     .select(`
       id, scheduled_date, status,
-      dest:locations!ordering_location_id(name),
+      dest:locations!ordering_location_id(id, name),
+      route:routes(name),
       items:order_items(
         id, quantity, picked, oos, rolled_over,
-        product:products(id, name, unit, category:categories(name))
+        product:products(
+          id, name, unit,
+          category:categories(name),
+          fulfillment:product_fulfillment(location_id, in_stock, loc:locations(id,name))
+        )
       )
     `)
     .gte('scheduled_date', from)
@@ -2532,16 +2539,35 @@ async function loadReportsTab() {
   if(error) { el.innerHTML=`<p class="empty">Error: ${error.message}</p>`; return; }
   if(!orders?.length) { el.innerHTML='<p class="empty">No orders found for this period.</p>'; return; }
 
-  // Flatten all picked items (exclude OOS, include picked or pending depending on filter)
+  // Flatten rows — derive source from product_fulfillment
+  // A product can have multiple fulfillment locations; pick the one that's on this route's stops
+  const routeStopLocIds = {}; // route_id -> Set of location_ids
+  for(const rs of allRouteStops) {
+    if(!routeStopLocIds[rs.route_id]) routeStopLocIds[rs.route_id] = new Set();
+    routeStopLocIds[rs.route_id].add(rs.location_id);
+  }
+
   const rows = [];
   for(const order of orders) {
+    const routeLocIds = routeStopLocIds[order.route_id] || new Set();
     for(const item of (order.items||[])) {
       if(item.oos) continue;
-      if(item.rolled_over) continue; // don't double-count rollovers
+      if(item.rolled_over) continue;
       if(!item.product) continue;
+
+      // Find the source: fulfillment location that is on this route and in stock
+      const fulfillSources = (item.product.fulfillment||[]).filter(f=>f.in_stock && routeLocIds.has(f.location_id));
+      // If multiple, pick first; if none found fall back to 'Unknown source'
+      const source = fulfillSources[0]?.loc?.name || 'Unknown source';
+      const sourceId = fulfillSources[0]?.loc?.id || null;
+
       rows.push({
         date: order.scheduled_date,
+        source,
+        source_id: sourceId,
         dest: order.dest?.name || '?',
+        dest_id: order.dest?.id || null,
+        route: order.route?.name || '?',
         product: item.product.name,
         product_id: item.product.id,
         unit: item.product.unit,
@@ -2556,71 +2582,119 @@ async function loadReportsTab() {
 
   if(!rows.length) { el.innerHTML='<p class="empty">No items to report for this period.</p>'; return; }
 
-  // Group the data
-  const groups = {};
-  for(const row of rows) {
-    const key = groupBy==='product' ? row.product
-      : groupBy==='category' ? row.category
-      : row.dest;
-    if(!groups[key]) groups[key] = { label: key, items: {}, totalQty: 0, destinations: new Set() };
-    const g = groups[key];
-    const subKey = groupBy==='product' ? row.dest
-      : groupBy==='category' ? row.product
-      : row.product;
-    if(!g.items[subKey]) g.items[subKey] = { label: subKey, qty: 0, unit: row.unit };
-    g.items[subKey].qty += row.qty;
-    g.totalQty += row.qty;
-    g.destinations.add(row.dest);
-  }
-
-  const sortedGroups = Object.values(groups).sort((a,b)=>b.totalQty-a.totalQty);
-  const totalItems = rows.reduce((s,r)=>s+r.qty, 0);
+  // Summary stats
+  const totalQty = rows.reduce((s,r)=>s+r.qty, 0);
   const uniqueProducts = new Set(rows.map(r=>r.product)).size;
   const uniqueDests = new Set(rows.map(r=>r.dest)).size;
-
+  const uniqueSources = new Set(rows.map(r=>r.source)).size;
   summaryEl.innerHTML = [
-    ['Total units transferred', totalItems],
+    ['Total units transferred', totalQty],
     ['Unique products', uniqueProducts],
-    ['Stores receiving', uniqueDests],
-    ['Date range', `${from} → ${to}`]
+    ['Source locations', uniqueSources],
+    ['Receiving stores', uniqueDests],
   ].map(([label,val])=>`
-    <div style="background:var(--surface2);border-radius:8px;padding:12px 16px;min-width:140px">
-      <div style="font-size:20px;font-weight:700;color:var(--accent)">${val}</div>
+    <div style="background:var(--surface2);border-radius:8px;padding:12px 16px;min-width:130px">
+      <div style="font-size:22px;font-weight:700;color:var(--accent)">${val}</div>
       <div style="font-size:11px;color:var(--text2);margin-top:2px">${label}</div>
     </div>`).join('');
 
-  const subLabel = groupBy==='product' ? 'Destination'
-    : groupBy==='category' ? 'Product'
-    : 'Product';
+  // Render based on view
+  if(view === 'billing') {
+    renderBillingView(rows, el);
+  } else if(view === 'destination') {
+    renderGroupedView(rows, el, r=>r.dest, r=>r.source+' → '+r.product, 'Source → Product');
+  } else if(view === 'source') {
+    renderGroupedView(rows, el, r=>r.source, r=>r.dest+' → '+r.product, 'Destination → Product');
+  } else if(view === 'product') {
+    renderGroupedView(rows, el, r=>r.product, r=>r.source+' → '+r.dest, 'Source → Destination', r=>r.unit);
+  } else if(view === 'category') {
+    renderGroupedView(rows, el, r=>r.category, r=>r.product, 'Product', null, true);
+  }
+}
 
-  el.innerHTML = sortedGroups.map(g => {
-    const subRows = Object.values(g.items).sort((a,b)=>b.qty-a.qty);
-    return `
-      <div style="margin-bottom:20px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
-          <strong style="font-size:15px">${g.label}</strong>
-          <span class="badge binfo" style="font-size:11px">${g.totalQty} total units</span>
-          ${groupBy!=='destination'?`<span style="font-size:12px;color:var(--text2)">${g.destinations.size} store${g.destinations.size!==1?'s':''}</span>`:''}
+// Billing view: for each source location, show a table of what went to each destination
+// This is the primary cost-allocation view: "COM sent X of Y to Bellevue"
+function renderBillingView(rows, el) {
+  // Group: source -> dest -> [products]
+  const bySource = {};
+  for(const r of rows) {
+    if(!bySource[r.source]) bySource[r.source] = {};
+    const sd = bySource[r.source];
+    if(!sd[r.dest]) sd[r.dest] = {};
+    const key = r.product+'__'+r.unit;
+    if(!sd[r.dest][key]) sd[r.dest][key] = {product:r.product, unit:r.unit, qty:0};
+    sd[r.dest][key].qty += r.qty;
+  }
+
+  const allDests = [...new Set(rows.map(r=>r.dest))].sort();
+
+  el.innerHTML = Object.entries(bySource).sort().map(([source, destMap])=>{
+    const sourceTotal = Object.values(destMap).flatMap(d=>Object.values(d)).reduce((s,p)=>s+p.qty,0);
+    const destSections = Object.entries(destMap).sort().map(([dest, products])=>{
+      const destTotal = Object.values(products).reduce((s,p)=>s+p.qty, 0);
+      const prodRows = Object.values(products).sort((a,b)=>b.qty-a.qty);
+      return `<div style="margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px;padding:4px 8px;background:var(--surface2);border-radius:4px">
+          → ${dest} <span style="font-weight:400">(${destTotal} units)</span>
         </div>
-        <table class="tbl" style="margin:0">
-          <thead><tr><th>${subLabel}</th><th style="text-align:right">Qty</th><th>Unit</th></tr></thead>
-          <tbody>
-            ${subRows.map(r=>`<tr>
-              <td>${r.label}</td>
-              <td style="text-align:right;font-weight:600">${r.qty}</td>
-              <td style="color:var(--text2);font-size:12px">${r.unit}</td>
-            </tr>`).join('')}
-          </tbody>
+        <table class="tbl" style="margin:0 0 0 12px;width:calc(100% - 12px)">
+          <thead><tr><th>Product</th><th style="text-align:right">Qty</th><th>Unit</th></tr></thead>
+          <tbody>${prodRows.map(p=>`<tr>
+            <td>${p.product}</td>
+            <td style="text-align:right;font-weight:600">${p.qty}</td>
+            <td style="color:var(--text2);font-size:12px">${p.unit}</td>
+          </tr>`).join('')}</tbody>
         </table>
       </div>`;
+    }).join('');
+
+    return `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="padding:12px 16px;background:var(--surface2);display:flex;align-items:center;gap:10px">
+        <strong style="font-size:15px">${source}</strong>
+        <span class="badge binfo">${sourceTotal} units sent</span>
+        <span style="font-size:12px;color:var(--text2)">to ${Object.keys(destMap).length} location${Object.keys(destMap).length!==1?'s':''}</span>
+      </div>
+      <div style="padding:12px 16px">${destSections}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderGroupedView(rows, el, keyFn, subKeyFn, subLabel, unitFn=null, showProductUnit=false) {
+  const groups = {};
+  for(const r of rows) {
+    const key = keyFn(r);
+    if(!groups[key]) groups[key] = {label:key, items:{}, totalQty:0};
+    const sk = subKeyFn(r);
+    if(!groups[key].items[sk]) groups[key].items[sk] = {label:sk, qty:0, unit:r.unit};
+    groups[key].items[sk].qty += r.qty;
+    groups[key].totalQty += r.qty;
+  }
+  const sorted = Object.values(groups).sort((a,b)=>b.totalQty-a.totalQty);
+  el.innerHTML = sorted.map(g=>{
+    const subRows = Object.values(g.items).sort((a,b)=>b.qty-a.qty);
+    return `<div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+        <strong style="font-size:15px">${g.label}</strong>
+        <span class="badge binfo" style="font-size:11px">${g.totalQty} units</span>
+      </div>
+      <table class="tbl" style="margin:0">
+        <thead><tr><th>${subLabel}</th><th style="text-align:right">Qty</th><th>Unit</th></tr></thead>
+        <tbody>${subRows.map(r=>`<tr>
+          <td>${r.label}</td>
+          <td style="text-align:right;font-weight:600">${r.qty}</td>
+          <td style="color:var(--text2);font-size:12px">${r.unit}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
   }).join('');
 }
 
 function exportReportCSV() {
   if(!_reportData.length) { alert('Generate a report first.'); return; }
-  const headers = ['Date','Product','Category','Destination','Qty','Unit','Picked','Order Status'];
+  const headers = ['Date','Source','Destination','Route','Product','Category','Qty','Unit','Picked','Status'];
   const rows = _reportData.map(r=>[
-    r.date, `"${r.product}"`, `"${r.category}"`, `"${r.dest}"`,
+    r.date, `"${r.source}"`, `"${r.dest}"`, `"${r.route}"`,
+    `"${r.product}"`, `"${r.category}"`,
     r.qty, r.unit, r.picked?'Yes':'No', r.status
   ]);
   const csv = [headers, ...rows].map(r=>r.join(',')).join('\n');
