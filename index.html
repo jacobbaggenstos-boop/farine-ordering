@@ -841,8 +841,8 @@ function renderOrderItems() {
           const nr = findNextRoute(destLocId, p.id);
           const isOOS = p.oos || (window._oosLogOpen||[]).some(e=>e.product_id===p.id);
           const routeHint = nr
-            ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span>${isOOS?'<span style="font-size:11px;color:var(--err);margin-left:4px">· OOS warning</span>':''}`
-            : `<span style="font-size:11px;color:var(--err)">No route</span>`;
+            ? `<span style="font-size:11px;color:var(--text3)">${nr.route.name}${nr.cutoffPassed?' · tomorrow':''}</span><span style="font-size:11px;color:var(--accent);margin-left:6px;font-weight:500">· ${p.unit}</span>${isOOS?'<span style="font-size:11px;color:var(--err);margin-left:4px">· OOS warning</span>':''}`
+            : `<span style="font-size:11px;color:var(--err)">No route</span><span style="font-size:11px;color:var(--accent);margin-left:6px;font-weight:500">· ${p.unit}</span>`;
           const alreadyOrdered = pendingQtys[p.id]||0;
           const onOrderBadge = alreadyOrdered > 0
             ? `<span style="min-width:60px;text-align:center;font-size:13px;font-weight:600;color:var(--warn)">${alreadyOrdered} ${p.unit}</span>`
